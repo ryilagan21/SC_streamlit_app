@@ -409,7 +409,7 @@ if main_menu == "Land Acquisition":
         # Replace placeholders
         replace_placeholders(doc, replacements)
 
-       import io
+import io
 
         #Fetch property name and type for filename
         cursor.execute("SELECT property_name, property_type FROM deals WHERE pk = ?", (deal_pk,))
