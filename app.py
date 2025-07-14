@@ -305,11 +305,36 @@ if main_menu == "Land Acquisition":
             broker_address2 = st.text_input("Broker Address Line 2")
             property_full_description = st.text_area("Property Name with Address and Description")
 
-            purchase_price = st.text_input("Purchase Price")
-            earnest_money_1 = st.text_input("Earnest Money (Initial Deposit)")
-            earnest_money_2 = st.text_input("Earnest Money (Second Deposit)")
-            feasibility_period = st.text_input("Feasibility Period")
-            close_of_escrow = st.text_input("Close of Escrow Period")
+            col1, col2 = st.columns([1, 4])
+            with col1:
+                purchase_price = st.text_input("Purchase Price")
+            with col2:
+                st.markdown('<div style="padding-top: 2.2em; color:red;">*Must include commas and decimal point</div>', unsafe_allow_html=True)
+
+            col3, col4 = st.columns([1, 4])
+            with col3:
+                earnest_money_1 = st.text_input("Earnest Money (Initial Deposit)")
+            with col4:
+                st.markdown('<div style="padding-top: 2.2em; color:red;">*Must include commas and decimal point</div>', unsafe_allow_html=True)
+
+            col5, col6 = st.columns([1, 4])
+            with col5:
+                earnest_money_2 = st.text_input("Earnest Money (Second Deposit)")
+            with col6:
+                st.markdown('<div style="padding-top: 2.2em; color:red;">*Must include commas and decimal point</div>', unsafe_allow_html=True)
+
+            col7, col8 = st.columns([2, 3])
+            with col7:
+                feasibility_period = st.text_input("Feasibility Period")
+            with col8:
+                st.markdown('<div style="padding-top: 2.2em; color:red;">Follow this format: one hundred twenty (120) days</div>', unsafe_allow_html=True)
+
+            col9, col10 = st.columns([2, 3])
+            with col9:
+                close_of_escrow = st.text_input("Close of Escrow Period")
+            with col10:
+                st.markdown('<div style="padding-top: 2.2em; color:red;">Follow this format: one hundred twenty (120) days</div>', unsafe_allow_html=True)
+
             signer_name = st.text_input("Signer Name")
             signer_title = st.text_input("Signer Title")
             sent_at = st.date_input("Date Sent (optional)", value=None)
