@@ -408,8 +408,8 @@ if main_menu == "Land Acquisition":
         replace_placeholders(doc, replacements)
 
         # Save to OneDrive
-        output_folder = "/Users/ryanchristianilagan/Library/CloudStorage/OneDrive-ScottCommunities/Scott Communities Team Site - Documents/0 - ADMINISTRATIVE/Ryan_Experiments"
-        os.makedirs(output_folder, exist_ok=True)
+        import tempfile
+        output_folder = tempfile.gettempdir()
         filename = f"LOI_{deal_pk}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
         output_path = os.path.join(output_folder, filename)
         doc.save(output_path)
