@@ -4,6 +4,8 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
+import io
+
 
 # --- Constants ---
 STATUS_OPTIONS = ["Not started", "Underwriting", "Initial Review", "LOI", "Second Review", "PSA", "No Go"]
@@ -407,14 +409,25 @@ if main_menu == "Land Acquisition":
         # Replace placeholders
         replace_placeholders(doc, replacements)
 
-        # Save to OneDrive
-        import tempfile
-        output_folder = tempfile.gettempdir()
-        filename = f"LOI_{deal_pk}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
-        output_path = os.path.join(output_folder, filename)
-        doc.save(output_path)
+       import io
 
-        # Log in database
+        #Fetch property name and type for filename
+        cursor.execute("SELECT property_name, property_type FROM deals WHERE pk = ?", (deal_pk,))
+        property_name, property_type = cursor.fetchone()
+
+        def sanitize(text):
+            return text.strip().replace(" ", "_").replace("/", "-")
+
+        safe_name = sanitize(property_name)
+        safe_type = sanitize(property_type)
+        filename = f"LOI_{safe_name}_{safe_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+
+        # Save the document to memory
+        doc_io = io.BytesIO()
+        doc.save(doc_io)
+        doc_io.seek(0)
+
+        # Log in database (file_path can be left blank or set to filename only)
         cursor.execute('''
             INSERT INTO lois (deal_pk, created_at, sent_at, received_at, file_path, notes)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -423,14 +436,16 @@ if main_menu == "Land Acquisition":
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             sent_at.strftime("%Y-%m-%d") if sent_at else None,
             received_at.strftime("%Y-%m-%d") if received_at else None,
-            output_path,
+            filename,  # or use "" if you prefer to leave it blank
             notes
         ))
         conn.commit()
 
-        st.success("✅ LOI generated and saved to OneDrive.")
-        with open(output_path, "rb") as file:
-            st.download_button("📥 Download LOI", file, file_name=filename)
+        
+        # Show download button
+        st.success("✅ LOI generated.")
+        st.download_button("📥 Download LOI", doc_io, file_name=filename)
+
 
 
 
