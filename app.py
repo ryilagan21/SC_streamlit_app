@@ -118,6 +118,7 @@ def render_status_cell(status):
         "LOI": ("#AED581", 60),
         "Second Review": ("#66BB6A", 80),
         "PSA": ("#66BB6A", 100),
+        "No Go": ("#FF6961",100),
     }
     color, fill = color_map.get(status, ("#FFFFFF", 0))
     return f"""
