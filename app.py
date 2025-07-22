@@ -8,6 +8,8 @@ import io
 from docx import Document
 import os
 import bcrypt
+import land_development
+
 
 # --- Load users from Excel ---
 @st.cache_data
@@ -186,6 +188,10 @@ if st.session_state.logged_in:
 
     # --- Sidebar Navigation ---
     main_menu = st.sidebar.selectbox("Main Menu", ["Land Acquisition", "Land Development"])
+    if main_menu == "Land Development":
+        land_development.render_land_development_ui()
+        st.stop()  # Prevents the rest of the app from running
+
 
     if main_menu == "Land Acquisition":
         st.title("📍 Land Acquisition Tracker")
