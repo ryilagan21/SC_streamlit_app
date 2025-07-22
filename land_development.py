@@ -1,6 +1,7 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+import io
 
 # --- Database Connection ---
 conn = sqlite3.connect("deals.db", check_same_thread=False)
@@ -28,7 +29,6 @@ conn.commit()
 def render_add_entry():
     st.header("➕ Add Land Development Entry")
 
-    # Move classification outside the form for dynamic control
     classification = st.selectbox("Classification", ["Proposed Budget", "Change Order"])
 
     with st.form("add_entry_form"):
@@ -37,7 +37,6 @@ def render_add_entry():
         budget_item = st.text_input("Budget Item")
         contractor = st.text_input("Contractor")
 
-        # Dynamically render budget fields
         if classification == "Proposed Budget":
             proposed_budget = st.number_input("Proposed Budget", min_value=0.0, format="%.2f")
             change_order = 0.0
@@ -56,7 +55,6 @@ def render_add_entry():
 
     if submit:
         date_value = date_executed.strftime("%Y-%m-%d") if date_optional else None
-
         cursor.execute('''
             INSERT INTO land_development (
                 community, location, budget_item, contractor, classification,
@@ -95,7 +93,6 @@ def render_budget_summary():
 def render_edit_form(row):
     st.write("📝 Edit Entry")
 
-    # Move classification outside the form for dynamic control
     classification = st.selectbox(
         "Classification",
         ["Proposed Budget", "Change Order"],
@@ -108,7 +105,6 @@ def render_edit_form(row):
         budget_item = st.text_input("Budget Item", value=row["budget_item"])
         contractor = st.text_input("Contractor", value=row["contractor"])
 
-        # Dynamically render budget fields
         if classification == "Proposed Budget":
             proposed_budget = st.number_input("Proposed Budget", value=row["proposed_budget"], format="%.2f")
             change_order = 0.0
@@ -153,7 +149,6 @@ def render_details_view():
 
     df = pd.read_sql_query("SELECT * FROM land_development", conn)
 
-    # --- Filters ---
     with st.expander("🔍 Filters", expanded=True):
         col1, col2, col3 = st.columns(3)
         col4, col5, col6 = st.columns(3)
@@ -214,11 +209,60 @@ def render_preview_all():
         st.info("No entries found.")
     else:
         st.dataframe(df)
+# --- Batch Entry View ---
+def render_batch_entry():
+    st.header("📥 Batch Entry")
+
+    st.markdown("Download the Excel template, fill it in, and upload it below:")
+    with open("land_development_batch_template.xlsx", "rb") as f:
+        st.download_button(
+            label="📄 Download Template",
+            data=f,
+            file_name="land_development_batch_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    uploaded_file = st.file_uploader("Upload filled Excel file", type=["xlsx"])
+
+    if uploaded_file:
+        try:
+            df = pd.read_excel(uploaded_file)
+
+            required_columns = [
+                "community", "location", "budget_item", "contractor", "classification",
+                "proposed_budget", "change_order", "revised_budget", "status", "date_executed"
+            ]
+
+            if not all(col in df.columns for col in required_columns):
+                st.error("❌ Uploaded file is missing required columns.")
+                return
+
+            for _, row in df.iterrows():
+                date_value = pd.to_datetime(row["date_executed"]).strftime("%Y-%m-%d") if pd.notnull(row["date_executed"]) else None
+
+                cursor.execute('''
+                    INSERT INTO land_development (
+                        community, location, budget_item, contractor, classification,
+                        proposed_budget, change_order, revised_budget, status, date_executed
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    row["community"], row["location"], row["budget_item"], row["contractor"],
+                    row["classification"], row["proposed_budget"] or 0.0, row["change_order"] or 0.0,
+                    row["revised_budget"], row["status"], date_value
+                ))
+
+            conn.commit()
+            st.success("✅ Batch records uploaded successfully.")
+
+        except Exception as e:
+            st.error(f"❌ Error processing file: {e}")
 
 # --- Route Views ---
 def render_land_development_ui():
     st.title("🏗️ Land Development")
-    view = st.sidebar.radio("Select View", ["Budget Summary", "Details", "Preview All", "Add Entry"])
+    view = st.sidebar.radio("Select View", [
+        "Budget Summary", "Details", "Preview All", "Add Entry", "Batch Entry"
+    ])
 
     if view == "Budget Summary":
         render_budget_summary()
@@ -228,3 +272,9 @@ def render_land_development_ui():
         render_preview_all()
     elif view == "Add Entry":
         render_add_entry()
+    elif view == "Batch Entry":
+        render_batch_entry()
+
+# --- Run App ---
+if __name__ == "__main__":
+    render_land_development_ui()
