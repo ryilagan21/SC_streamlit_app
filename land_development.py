@@ -1,3 +1,5 @@
+# app.py (Part 1)
+
 import streamlit as st
 import sqlite3
 import pandas as pd
@@ -66,6 +68,7 @@ def render_add_entry():
         ))
         conn.commit()
         st.success("✅ Entry added successfully.")
+# app.py (Part 2)
 
 # --- Budget Summary View ---
 def render_budget_summary():
@@ -89,6 +92,7 @@ def render_budget_summary():
         "Total Change Order": "${:,.2f}",
         "Total Revised": "${:,.2f}"
     }))
+
 # --- Edit Entry Form ---
 def render_edit_form(row):
     st.write("📝 Edit Entry")
@@ -198,6 +202,7 @@ def render_details_view():
                 for _, row in group.iterrows():
                     st.dataframe(pd.DataFrame([row]))
                     render_edit_form(row)
+# app.py (Part 3)
 
 # --- Preview All View ---
 def render_preview_all():
@@ -209,6 +214,7 @@ def render_preview_all():
         st.info("No entries found.")
     else:
         st.dataframe(df)
+
 # --- Batch Entry View ---
 def render_batch_entry():
     st.header("📥 Batch Entry")
@@ -270,6 +276,23 @@ def render_batch_entry():
         except Exception as e:
             st.error(f"❌ Error processing file: {e}")
 
+# --- Route Views ---
+def render_land_development_ui():
+    st.title("🏗️ Land Development")
+    view = st.sidebar.radio("Select View", [
+        "Budget Summary", "Details", "Preview All", "Add Entry", "Batch Entry"
+    ])
+
+    if view == "Budget Summary":
+        render_budget_summary()
+    elif view == "Details":
+        render_details_view()
+    elif view == "Preview All":
+        render_preview_all()
+    elif view == "Add Entry":
+        render_add_entry()
+    elif view == "Batch Entry":
+        render_batch_entry()
 
 # --- Run App ---
 if __name__ == "__main__":
