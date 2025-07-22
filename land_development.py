@@ -80,6 +80,10 @@ def render_budget_summary():
         st.info("No data available.")
         return
 
+    # Ensure numeric columns are properly converted
+    for col in ["proposed_budget", "change_order", "revised_budget"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+
     summary = df.groupby(["community", "contractor"]).agg({
         "proposed_budget": "sum",
         "change_order": "sum",
@@ -92,6 +96,7 @@ def render_budget_summary():
         "Total Change Order": "${:,.2f}",
         "Total Revised": "${:,.2f}"
     }))
+
 
 # --- Edit Entry Form ---
 def render_edit_form(row):
