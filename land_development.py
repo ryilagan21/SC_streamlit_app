@@ -1,14 +1,3 @@
-# app.py
-
-import streamlit as st
-from land_development import render_land_development_ui
-
-def main():
-    st.set_page_config(page_title="Land Development Tracker", layout="wide")
-    render_land_development_ui()
-
-if __name__ == "__main__":
-    main()
 # land_development.py (Part 1)
 
 import streamlit as st
@@ -178,7 +167,6 @@ def render_details_view():
         if classification_filter != "All" and classification_filter not in group["classification"].values: return False
         if status_filter != "All" and status_filter not in group["status"].values: return False
         return True
-
     grouped = df.groupby(["community", "location", "budget_item", "contractor"])
     filtered_groups = [group for _, group in grouped if matches_filters(group)]
 
@@ -211,6 +199,7 @@ def render_details_view():
                 for _, row in group.iterrows():
                     st.dataframe(pd.DataFrame([row]))
                     render_edit_form(row)
+# land_development.py (Part 3)
 
 # --- Preview All View ---
 def render_preview_all():
@@ -295,3 +284,4 @@ def render_land_development_ui():
         render_add_entry()
     elif view == "Batch Entry":
         render_batch_entry()
+
