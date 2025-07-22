@@ -1,36 +1,49 @@
-# app.py (Part 1)
+# app.py
 
 import streamlit as st
-import sqlite3
+from land_development import render_land_development_ui
+
+def main():
+    st.set_page_config(page_title="Land Development Tracker", layout="wide")
+    render_land_development_ui()
+
+if __name__ == "__main__":
+    main()
+# land_development.py (Part 1)
+
+import streamlit as st
 import pandas as pd
+import sqlite3
 import io
 
-# --- Database Connection ---
-conn = sqlite3.connect("deals.db", check_same_thread=False)
-cursor = conn.cursor()
+# --- Cached DB Connection ---
+@st.cache_resource
+def get_connection():
+    conn = sqlite3.connect("deals.db", check_same_thread=False)
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS land_development (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            community TEXT,
+            location TEXT,
+            budget_item TEXT,
+            contractor TEXT,
+            classification TEXT,
+            proposed_budget REAL,
+            change_order REAL,
+            revised_budget REAL,
+            status TEXT,
+            date_executed TEXT
+        )
+    ''')
+    conn.commit()
+    return conn
 
-# --- Ensure Table Exists ---
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS land_development (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    community TEXT,
-    location TEXT,
-    budget_item TEXT,
-    contractor TEXT,
-    classification TEXT,
-    proposed_budget REAL,
-    change_order REAL,
-    revised_budget REAL,
-    status TEXT,
-    date_executed TEXT
-)
-''')
-conn.commit()
+conn = get_connection()
+cursor = conn.cursor()
 
 # --- Add Entry View ---
 def render_add_entry():
     st.header("➕ Add Land Development Entry")
-
     classification = st.selectbox("Classification", ["Proposed Budget", "Change Order"])
 
     with st.form("add_entry_form"):
@@ -39,15 +52,8 @@ def render_add_entry():
         budget_item = st.text_input("Budget Item")
         contractor = st.text_input("Contractor")
 
-        if classification == "Proposed Budget":
-            proposed_budget = st.number_input("Proposed Budget", min_value=0.0, format="%.2f")
-            change_order = 0.0
-            st.number_input("Change Order", value=0.0, disabled=True, format="%.2f")
-        else:
-            proposed_budget = 0.0
-            st.number_input("Proposed Budget", value=0.0, disabled=True, format="%.2f")
-            change_order = st.number_input("Change Order", min_value=0.0, format="%.2f")
-
+        proposed_budget = st.number_input("Proposed Budget", min_value=0.0, format="%.2f", disabled=(classification != "Proposed Budget"))
+        change_order = st.number_input("Change Order", min_value=0.0, format="%.2f", disabled=(classification != "Change Order"))
         revised_budget = st.number_input("Revised Budget", min_value=0.0, format="%.2f")
         status = st.selectbox("Status", ["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"])
         date_optional = st.checkbox("Specify Date Executed")
@@ -56,31 +62,43 @@ def render_add_entry():
         submit = st.form_submit_button("✅ Save Entry")
 
     if submit:
+        if not community or not location or not budget_item:
+            st.error("Please fill in all required fields.")
+            return
+
         date_value = date_executed.strftime("%Y-%m-%d") if date_optional else None
-        cursor.execute('''
-            INSERT INTO land_development (
+        try:
+            cursor.execute('''
+                INSERT INTO land_development (
+                    community, location, budget_item, contractor, classification,
+                    proposed_budget, change_order, revised_budget, status, date_executed
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
                 community, location, budget_item, contractor, classification,
-                proposed_budget, change_order, revised_budget, status, date_executed
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            community, location, budget_item, contractor, classification,
-            proposed_budget, change_order, revised_budget, status, date_value
-        ))
-        conn.commit()
-        st.success("✅ Entry added successfully.")
-# app.py (Part 2)
+                proposed_budget, change_order, revised_budget, status, date_value
+            ))
+            conn.commit()
+            st.success("✅ Entry added successfully.")
+        except Exception as e:
+            st.error(f"❌ Failed to add entry: {e}")
+# land_development.py (Part 2)
+
+# --- Safe Currency Formatter ---
+def safe_currency(value):
+    try:
+        return f"${float(value):,.2f}"
+    except (ValueError, TypeError):
+        return "—"
 
 # --- Budget Summary View ---
 def render_budget_summary():
     st.header("📊 Budget Summary")
-
     df = pd.read_sql_query("SELECT * FROM land_development", conn)
 
     if df.empty:
         st.info("No data available.")
         return
 
-    # Ensure numeric columns are properly converted
     for col in ["proposed_budget", "change_order", "revised_budget"]:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
@@ -97,16 +115,11 @@ def render_budget_summary():
         "Total Revised": "${:,.2f}"
     }))
 
-
 # --- Edit Entry Form ---
 def render_edit_form(row):
     st.write("📝 Edit Entry")
 
-    classification = st.selectbox(
-        "Classification",
-        ["Proposed Budget", "Change Order"],
-        index=["Proposed Budget", "Change Order"].index(row["classification"])
-    )
+    classification = st.selectbox("Classification", ["Proposed Budget", "Change Order"], index=["Proposed Budget", "Change Order"].index(row["classification"]))
 
     with st.form(f"edit_form_{row['id']}"):
         community = st.text_input("Community", value=row["community"])
@@ -114,21 +127,11 @@ def render_edit_form(row):
         budget_item = st.text_input("Budget Item", value=row["budget_item"])
         contractor = st.text_input("Contractor", value=row["contractor"])
 
-        if classification == "Proposed Budget":
-            proposed_budget = st.number_input("Proposed Budget", value=row["proposed_budget"], format="%.2f")
-            change_order = 0.0
-            st.number_input("Change Order", value=row["change_order"], disabled=True, format="%.2f")
-        else:
-            proposed_budget = 0.0
-            st.number_input("Proposed Budget", value=row["proposed_budget"], disabled=True, format="%.2f")
-            change_order = st.number_input("Change Order", value=row["change_order"], format="%.2f")
-
+        proposed_budget = st.number_input("Proposed Budget", value=row["proposed_budget"], format="%.2f", disabled=(classification != "Proposed Budget"))
+        change_order = st.number_input("Change Order", value=row["change_order"], format="%.2f", disabled=(classification != "Change Order"))
         revised_budget = st.number_input("Revised Budget", value=row["revised_budget"], format="%.2f")
-        status = st.selectbox(
-            "Status",
-            ["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"],
-            index=["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"].index(row["status"])
-        )
+
+        status = st.selectbox("Status", ["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"], index=["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"].index(row["status"]))
 
         date_executed = pd.to_datetime(row["date_executed"]) if row["date_executed"] else None
         date_optional = st.checkbox("Specify Date Executed", value=bool(date_executed))
@@ -138,7 +141,6 @@ def render_edit_form(row):
 
     if save:
         date_value = date_input.strftime("%Y-%m-%d") if date_optional else None
-
         cursor.execute('''
             UPDATE land_development SET
                 community=?, location=?, budget_item=?, contractor=?, classification=?,
@@ -153,17 +155,8 @@ def render_edit_form(row):
         st.success("✅ Entry updated.")
 
 # --- Details View ---
-# Helper function for safe currency formatting
-def safe_currency(value):
-    try:
-        return f"${float(value):,.2f}"
-    except (ValueError, TypeError):
-        return "—"
-
-# --- Details View ---
 def render_details_view():
     st.header("📋 Development Details")
-
     df = pd.read_sql_query("SELECT * FROM land_development", conn)
 
     with st.expander("🔍 Filters", expanded=True):
@@ -189,6 +182,10 @@ def render_details_view():
     grouped = df.groupby(["community", "location", "budget_item", "contractor"])
     filtered_groups = [group for _, group in grouped if matches_filters(group)]
 
+    if not filtered_groups:
+        st.warning("No matching records found.")
+        return
+
     items_per_page = 5
     total_pages = (len(filtered_groups) - 1) // items_per_page + 1
     page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1)
@@ -200,7 +197,7 @@ def render_details_view():
     for group in paginated_groups:
         first_row = group.iloc[0]
         with st.container():
-            cols = st.columns([1.5, 1.5, 1.5, 1.5, 1, 1, 1, 1])  # 8 columns
+            cols = st.columns([1.5, 1.5, 1.5, 1.5, 1, 1, 1, 1])
             cols[0].write(first_row["community"])
             cols[1].write(first_row["location"])
             cols[2].write(first_row["budget_item"])
@@ -211,19 +208,14 @@ def render_details_view():
             cols[7].markdown("➕", unsafe_allow_html=True)
 
             with st.expander("View Versions"):
-                st.write("### Versions")
                 for _, row in group.iterrows():
                     st.dataframe(pd.DataFrame([row]))
                     render_edit_form(row)
 
-# app.py (Part 3)
-
 # --- Preview All View ---
 def render_preview_all():
     st.header("📁 Preview All Entries")
-
     df = pd.read_sql_query("SELECT * FROM land_development", conn)
-
     if df.empty:
         st.info("No entries found.")
     else:
@@ -232,21 +224,17 @@ def render_preview_all():
 # --- Batch Entry View ---
 def render_batch_entry():
     st.header("📥 Batch Entry")
-
     st.markdown("Download the Excel template, fill it in, and upload it below:")
 
-    # Create an empty DataFrame with required columns
     template_df = pd.DataFrame(columns=[
         "community", "location", "budget_item", "contractor", "classification",
         "proposed_budget", "change_order", "revised_budget", "status", "date_executed"
     ])
 
-    # Save to Excel in memory
     buffer = io.BytesIO()
     template_df.to_excel(buffer, index=False)
     buffer.seek(0)
 
-    # Download button for the template
     st.download_button(
         label="📄 Download Template",
         data=buffer,
@@ -254,39 +242,39 @@ def render_batch_entry():
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    # Upload filled Excel file
     uploaded_file = st.file_uploader("Upload filled Excel file", type=["xlsx"])
 
     if uploaded_file:
         try:
             df = pd.read_excel(uploaded_file)
 
-            required_columns = [
-                "community", "location", "budget_item", "contractor", "classification",
-                "proposed_budget", "change_order", "revised_budget", "status", "date_executed"
-            ]
-
+            required_columns = template_df.columns.tolist()
             if not all(col in df.columns for col in required_columns):
                 st.error("❌ Uploaded file is missing required columns.")
                 return
 
             for _, row in df.iterrows():
-                date_value = pd.to_datetime(row["date_executed"]).strftime("%Y-%m-%d") if pd.notnull(row["date_executed"]) else None
+                try:
+                    proposed_budget = float(row["proposed_budget"]) if pd.notnull(row["proposed_budget"]) else 0.0
+                    change_order = float(row["change_order"]) if pd.notnull(row["change_order"]) else 0.0
+                    revised_budget = float(row["revised_budget"]) if pd.notnull(row["revised_budget"]) else 0.0
+                    date_value = pd.to_datetime(row["date_executed"]).strftime("%Y-%m-%d") if pd.notnull(row["date_executed"]) else None
 
-                cursor.execute('''
-                    INSERT INTO land_development (
-                        community, location, budget_item, contractor, classification,
-                        proposed_budget, change_order, revised_budget, status, date_executed
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    row["community"], row["location"], row["budget_item"], row["contractor"],
-                    row["classification"], row["proposed_budget"] or 0.0, row["change_order"] or 0.0,
-                    row["revised_budget"], row["status"], date_value
-                ))
+                    cursor.execute('''
+                        INSERT INTO land_development (
+                            community, location, budget_item, contractor, classification,
+                            proposed_budget, change_order, revised_budget, status, date_executed
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        row["community"], row["location"], row["budget_item"], row["contractor"],
+                        row["classification"], proposed_budget, change_order,
+                        revised_budget, row["status"], date_value
+                    ))
+                except Exception as row_error:
+                    st.warning(f"Skipped row due to error: {row_error}")
 
             conn.commit()
             st.success("✅ Batch records uploaded successfully.")
-
         except Exception as e:
             st.error(f"❌ Error processing file: {e}")
 
@@ -307,7 +295,3 @@ def render_land_development_ui():
         render_add_entry()
     elif view == "Batch Entry":
         render_batch_entry()
-
-# --- Run App ---
-if __name__ == "__main__":
-    render_land_development_ui()
