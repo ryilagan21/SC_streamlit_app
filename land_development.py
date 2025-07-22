@@ -214,14 +214,27 @@ def render_batch_entry():
     st.header("📥 Batch Entry")
 
     st.markdown("Download the Excel template, fill it in, and upload it below:")
-    with open("land_development_batch_template.xlsx", "rb") as f:
-        st.download_button(
-            label="📄 Download Template",
-            data=f,
-            file_name="land_development_batch_template.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
 
+    # Create an empty DataFrame with required columns
+    template_df = pd.DataFrame(columns=[
+        "community", "location", "budget_item", "contractor", "classification",
+        "proposed_budget", "change_order", "revised_budget", "status", "date_executed"
+    ])
+
+    # Save to Excel in memory
+    buffer = io.BytesIO()
+    template_df.to_excel(buffer, index=False)
+    buffer.seek(0)
+
+    # Download button for the template
+    st.download_button(
+        label="📄 Download Template",
+        data=buffer,
+        file_name="land_development_batch_template.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    # Upload filled Excel file
     uploaded_file = st.file_uploader("Upload filled Excel file", type=["xlsx"])
 
     if uploaded_file:
@@ -257,23 +270,6 @@ def render_batch_entry():
         except Exception as e:
             st.error(f"❌ Error processing file: {e}")
 
-# --- Route Views ---
-def render_land_development_ui():
-    st.title("🏗️ Land Development")
-    view = st.sidebar.radio("Select View", [
-        "Budget Summary", "Details", "Preview All", "Add Entry", "Batch Entry"
-    ])
-
-    if view == "Budget Summary":
-        render_budget_summary()
-    elif view == "Details":
-        render_details_view()
-    elif view == "Preview All":
-        render_preview_all()
-    elif view == "Add Entry":
-        render_add_entry()
-    elif view == "Batch Entry":
-        render_batch_entry()
 
 # --- Run App ---
 if __name__ == "__main__":
