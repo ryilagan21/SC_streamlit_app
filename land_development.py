@@ -153,6 +153,14 @@ def render_edit_form(row):
         st.success("✅ Entry updated.")
 
 # --- Details View ---
+# Helper function for safe currency formatting
+def safe_currency(value):
+    try:
+        return f"${float(value):,.2f}"
+    except (ValueError, TypeError):
+        return "—"
+
+# --- Details View ---
 def render_details_view():
     st.header("📋 Development Details")
 
@@ -192,14 +200,14 @@ def render_details_view():
     for group in paginated_groups:
         first_row = group.iloc[0]
         with st.container():
-            cols = st.columns([1.5, 1.5, 1.5, 1.5, 1, 1, 1, 1])
+            cols = st.columns([1.5, 1.5, 1.5, 1.5, 1, 1, 1, 1])  # 8 columns
             cols[0].write(first_row["community"])
             cols[1].write(first_row["location"])
             cols[2].write(first_row["budget_item"])
             cols[3].write(first_row["contractor"])
-            cols[4].write(f"${first_row['proposed_budget']:,.2f}")
-            cols[5].write(f"${first_row['change_order']:,.2f}")
-            cols[6].write(f"${first_row['revised_budget']:,.2f}")
+            cols[4].write(safe_currency(first_row["proposed_budget"]))
+            cols[5].write(safe_currency(first_row["change_order"]))
+            cols[6].write(safe_currency(first_row["revised_budget"]))
             cols[7].markdown("➕", unsafe_allow_html=True)
 
             with st.expander("View Versions"):
@@ -207,6 +215,7 @@ def render_details_view():
                 for _, row in group.iterrows():
                     st.dataframe(pd.DataFrame([row]))
                     render_edit_form(row)
+
 # app.py (Part 3)
 
 # --- Preview All View ---
