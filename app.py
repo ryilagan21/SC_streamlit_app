@@ -38,9 +38,10 @@ if not st.session_state.logged_in:
             st.session_state.logged_in = True
             st.session_state.username = username
             st.success(f"Welcome, {username}!")
-            st.experimental_rerun()
+            st.stop()  # ✅ safer than rerun here
         else:
             st.error("Invalid username or password.")
+
 
 # --- Protected App Content ---
 if st.session_state.logged_in:
@@ -51,7 +52,8 @@ if st.session_state.logged_in:
     if st.button("Logout"):
         st.session_state.logged_in = False
         st.session_state.username = ""
-        st.experimental_rerun()
+        st.stop()  # ✅ safer than rerun here too
+
 
     # --- Constants ---
     STATUS_OPTIONS = ["Not started", "Underwriting", "Initial Review", "LOI", "Second Review", "PSA", "No Go"]
