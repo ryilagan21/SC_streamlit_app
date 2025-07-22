@@ -101,24 +101,32 @@ def render_edit_form(row):
         classification = st.selectbox("Classification", ["Proposed Budget", "Change Order"],
                                       index=["Proposed Budget", "Change Order"].index(row["classification"]))
 
+        # Initialize budget fields
+        proposed_budget = 0.0
+        change_order = 0.0
+
+        # Dynamically render budget fields
         if classification == "Proposed Budget":
             proposed_budget = st.number_input("Proposed Budget", value=row["proposed_budget"], format="%.2f")
-            change_order = 0.0
-            st.number_input("Change Order", value=0.0, disabled=True, format="%.2f")
+            st.number_input("Change Order", value=row["change_order"], disabled=True, format="%.2f")
         else:
-            proposed_budget = 0.0
-            st.number_input("Proposed Budget", value=0.0, disabled=True, format="%.2f")
+            st.number_input("Proposed Budget", value=row["proposed_budget"], disabled=True, format="%.2f")
             change_order = st.number_input("Change Order", value=row["change_order"], format="%.2f")
 
         revised_budget = st.number_input("Revised Budget", value=row["revised_budget"], format="%.2f")
         status = st.selectbox("Status", ["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"],
                               index=["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"].index(row["status"]))
 
-        date_executed = st.date_input("Date Executed", value=pd.to_datetime(row["date_executed"]) if row["date_executed"] else pd.to_datetime("today"))
+        # Handle optional date
+        date_executed = pd.to_datetime(row["date_executed"]) if row["date_executed"] else None
+        date_optional = st.checkbox("Specify Date Executed", value=bool(date_executed))
+        date_input = st.date_input("Date Executed", value=date_executed or pd.to_datetime("today"), disabled=not date_optional)
 
         save = st.form_submit_button("💾 Save Changes")
 
     if save:
+        date_value = date_input.strftime("%Y-%m-%d") if date_optional else None
+
         cursor.execute('''
             UPDATE land_development SET
                 community=?, location=?, budget_item=?, contractor=?, classification=?,
@@ -126,11 +134,12 @@ def render_edit_form(row):
             WHERE id=?
         ''', (
             community, location, budget_item, contractor, classification,
-            proposed_budget, change_order, revised_budget, status, date_executed.strftime("%Y-%m-%d"),
+            proposed_budget, change_order, revised_budget, status, date_value,
             row["id"]
         ))
         conn.commit()
         st.success("✅ Entry updated.")
+
 
 # --- Details View ---
 def render_details_view():
