@@ -101,59 +101,71 @@ def render_budget_summary():
         "Total Revised": "${:,.2f}"
     }))
 
-# --- Edit Entry Form ---
-def render_edit_form(row):
-    st.write("📝 Edit Entry")
-
+# --- Edit Entry Form (Inline) ---
+def render_inline_edit_form(row):
     unique_id = row["LD_PK"]
-    classification_value = row.get("classification", "Proposed Budget")
-    if classification_value not in ["Proposed Budget", "Change Order"]:
-        classification_value = "Proposed Budget"
+    edit_key = f"edit_mode_{unique_id}"
 
-    classification = st.selectbox(
-        "Classification",
-        ["Proposed Budget", "Change Order"],
-        index=["Proposed Budget", "Change Order"].index(classification_value),
-        key=f"classification_{unique_id}"
-    )
+    if st.session_state.get(edit_key, False):
+        with st.form(f"edit_form_{unique_id}"):
+            classification_value = row.get("classification", "Proposed Budget")
+            if classification_value not in ["Proposed Budget", "Change Order"]:
+                classification_value = "Proposed Budget"
 
-    with st.form(f"edit_form_{unique_id}"):
-        community = st.text_input("Community", value=row["community"], key=f"community_{unique_id}")
-        location = st.text_input("Location", value=row["location"], key=f"location_{unique_id}")
-        budget_item = st.text_input("Budget Item", value=row["budget_item"], key=f"budget_item_{unique_id}")
-        contractor = st.text_input("Contractor", value=row["contractor"], key=f"contractor_{unique_id}")
+            classification = st.selectbox("Classification", ["Proposed Budget", "Change Order"],
+                                          index=["Proposed Budget", "Change Order"].index(classification_value),
+                                          key=f"classification_{unique_id}")
 
-        proposed_budget = st.number_input("Proposed Budget", value=row["proposed_budget"], format="%.2f", disabled=(classification != "Proposed Budget"), key=f"proposed_budget_{unique_id}")
-        change_order = st.number_input("Change Order", value=row["change_order"], format="%.2f", disabled=(classification != "Change Order"), key=f"change_order_{unique_id}")
-        revised_budget = proposed_budget + change_order
+            community = st.text_input("Community", value=row["community"], key=f"community_{unique_id}")
+            location = st.text_input("Location", value=row["location"], key=f"location_{unique_id}")
+            budget_item = st.text_input("Budget Item", value=row["budget_item"], key=f"budget_item_{unique_id}")
+            contractor = st.text_input("Contractor", value=row["contractor"], key=f"contractor_{unique_id}")
 
-        status = st.selectbox(
-            "Status",
-            ["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"],
-            index=["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"].index(row["status"]),
-            key=f"status_{unique_id}"
-        )
+            proposed_budget = st.number_input("Proposed Budget", value=row["proposed_budget"], format="%.2f",
+                                              disabled=(classification != "Proposed Budget"),
+                                              key=f"proposed_budget_{unique_id}")
+            change_order = st.number_input("Change Order", value=row["change_order"], format="%.2f",
+                                           disabled=(classification != "Change Order"),
+                                           key=f"change_order_{unique_id}")
+            revised_budget = proposed_budget + change_order
 
-        date_executed = pd.to_datetime(row["date_executed"]) if row["date_executed"] else None
-        date_optional = st.checkbox("Specify Date Executed", value=bool(date_executed), key=f"date_optional_{unique_id}")
-        date_input = st.date_input("Date Executed", value=date_executed or pd.to_datetime("today"), disabled=not date_optional, key=f"date_input_{unique_id}")
+            status = st.selectbox("Status",
+                                  ["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"],
+                                  index=["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"].index(row["status"]),
+                                  key=f"status_{unique_id}")
 
-        save = st.form_submit_button("💾 Save Changes")
+            date_executed = pd.to_datetime(row["date_executed"]) if row["date_executed"] else None
+            date_optional = st.checkbox("Specify Date Executed", value=bool(date_executed), key=f"date_optional_{unique_id}")
+            date_input = st.date_input("Date Executed", value=date_executed or pd.to_datetime("today"),
+                                       disabled=not date_optional, key=f"date_input_{unique_id}")
 
-    if save:
-        date_value = date_input.strftime("%Y-%m-%d") if date_optional else None
-        cursor.execute('''
-            UPDATE land_development SET
-                community=?, location=?, budget_item=?, contractor=?, classification=?,
-                proposed_budget=?, change_order=?, revised_budget=?, status=?, date_executed=?
-            WHERE LD_PK=?
-        ''', (
-            community, location, budget_item, contractor, classification,
-            proposed_budget, change_order, revised_budget, status, date_value,
-            unique_id
-        ))
-        conn.commit()
-        st.success("✅ Entry updated.")
+            col1, col2 = st.columns(2)
+            save = col1.form_submit_button("💾 Save")
+            cancel = col2.form_submit_button("❌ Cancel")
+
+        if save:
+            date_value = date_input.strftime("%Y-%m-%d") if date_optional else None
+            cursor.execute('''
+                UPDATE land_development SET
+                    community=?, location=?, budget_item=?, contractor=?, classification=?,
+                    proposed_budget=?, change_order=?, revised_budget=?, status=?, date_executed=?
+                WHERE LD_PK=?
+            ''', (
+                community, location, budget_item, contractor, classification,
+                proposed_budget, change_order, revised_budget, status, date_value,
+                unique_id
+            ))
+            conn.commit()
+            st.success("✅ Entry updated.")
+            st.session_state[edit_key] = False
+
+        elif cancel:
+            st.session_state[edit_key] = False
+
+    else:
+        st.dataframe(pd.DataFrame([row]))
+        if st.button("✏️ Edit", key=f"edit_button_{unique_id}"):
+            st.session_state[edit_key] = True
 
 # --- Details View ---
 def render_details_view():
@@ -207,8 +219,7 @@ def render_details_view():
             st.write(f"**Total Revised:** ${total_revised:,.2f}")
 
             for _, row in group.iterrows():
-                st.dataframe(pd.DataFrame([row]))
-                render_edit_form(row)
+                render_inline_edit_form(row)
 # --- Preview All View ---
 def render_preview_all():
     st.header("📁 Preview All Entries")
@@ -266,28 +277,41 @@ def render_batch_entry():
                 st.error("❌ Uploaded file is missing required columns.")
                 return
 
-            for _, row in df.iterrows():
-                try:
-                    proposed_budget = clean_float(row["proposed_budget"])
-                    change_order = clean_float(row["change_order"])
-                    revised_budget = proposed_budget + change_order
-                    date_value = pd.to_datetime(row["date_executed"]).strftime("%Y-%m-%d") if pd.notnull(row["date_executed"]) else None
+            # Clean and preview
+            for col in ["proposed_budget", "change_order"]:
+                df[col] = df[col].apply(clean_float)
+            df["revised_budget"] = df["proposed_budget"] + df["change_order"]
 
-                    cursor.execute('''
-                        INSERT INTO land_development (
-                            community, location, budget_item, contractor, classification,
-                            proposed_budget, change_order, revised_budget, status, date_executed
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        row["community"], row["location"], row["budget_item"], row["contractor"],
-                        row["classification"], proposed_budget, change_order,
-                        revised_budget, row["status"], date_value
-                    ))
-                except Exception as row_error:
-                    st.warning(f"Skipped row due to error: {row_error}")
+            st.subheader("📋 Preview Uploaded Data")
+            st.dataframe(df.style.format({
+                "proposed_budget": "${:,.2f}",
+                "change_order": "${:,.2f}",
+                "revised_budget": "${:,.2f}"
+            }))
 
-            conn.commit()
-            st.success("✅ Batch records uploaded successfully.")
+            confirm, cancel = st.columns([1, 1])
+            if confirm.button("✅ Confirm Upload"):
+                for _, row in df.iterrows():
+                    try:
+                        date_value = pd.to_datetime(row["date_executed"]).strftime("%Y-%m-%d") if pd.notnull(row["date_executed"]) else None
+                        cursor.execute('''
+                            INSERT INTO land_development (
+                                community, location, budget_item, contractor, classification,
+                                proposed_budget, change_order, revised_budget, status, date_executed
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            row["community"], row["location"], row["budget_item"], row["contractor"],
+                            row["classification"], row["proposed_budget"], row["change_order"],
+                            row["revised_budget"], row["status"], date_value
+                        ))
+                    except Exception as row_error:
+                        st.warning(f"Skipped row due to error: {row_error}")
+                conn.commit()
+                st.success("✅ Batch records uploaded successfully.")
+
+            elif cancel.button("❌ Cancel"):
+                st.info("Upload canceled. No data was saved.")
+
         except Exception as e:
             st.error(f"❌ Error processing file: {e}")
 
