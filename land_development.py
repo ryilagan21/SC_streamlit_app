@@ -42,6 +42,7 @@ def render_add_entry():
         proposed_budget = st.number_input("Proposed Budget", min_value=0.0, format="%.2f", disabled=(classification != "Proposed Budget"))
         change_order = st.number_input("Change Order", min_value=0.0, format="%.2f", disabled=(classification != "Change Order"))
         revised_budget = proposed_budget + change_order
+
         status = st.selectbox("Status", ["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"])
         date_optional = st.checkbox("Specify Date Executed")
         date_executed = st.date_input("Date Executed", disabled=not date_optional)
@@ -71,9 +72,9 @@ def render_add_entry():
 # --- Safe Currency Formatter ---
 def safe_currency(value):
     try:
-        return f"${float(value):,.2f}"
+        return float(value)
     except (ValueError, TypeError):
-        return "—"
+        return 0.0
 
 # --- Budget Summary View ---
 def render_budget_summary():
@@ -105,11 +106,14 @@ def render_edit_form(row):
     st.write("📝 Edit Entry")
 
     unique_id = row["LD_PK"]
+    classification_value = row.get("classification", "Proposed Budget")
+    if classification_value not in ["Proposed Budget", "Change Order"]:
+        classification_value = "Proposed Budget"
 
     classification = st.selectbox(
         "Classification",
         ["Proposed Budget", "Change Order"],
-        index=["Proposed Budget", "Change Order"].index(row["classification"]),
+        index=["Proposed Budget", "Change Order"].index(classification_value),
         key=f"classification_{unique_id}"
     )
 
@@ -198,9 +202,9 @@ def render_details_view():
         total_revised = total_proposed + total_change_order
 
         with st.expander(f"➕ {first_row['community']} | {first_row['location']} | {first_row['budget_item']} | {first_row['contractor']}"):
-            st.write(f"**Total Proposed:** {safe_currency(total_proposed)}")
-            st.write(f"**Total Change Order:** {safe_currency(total_change_order)}")
-            st.write(f"**Total Revised:** {safe_currency(total_revised)}")
+            st.write(f"**Total Proposed:** ${total_proposed:,.2f}")
+            st.write(f"**Total Change Order:** ${total_change_order:,.2f}")
+            st.write(f"**Total Revised:** ${total_revised:,.2f}")
 
             for _, row in group.iterrows():
                 st.dataframe(pd.DataFrame([row]))
@@ -209,10 +213,18 @@ def render_details_view():
 def render_preview_all():
     st.header("📁 Preview All Entries")
     df = pd.read_sql_query("SELECT * FROM land_development", conn)
+
     if df.empty:
         st.info("No entries found.")
     else:
-        st.dataframe(df)
+        for col in ["proposed_budget", "change_order", "revised_budget"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+
+        st.dataframe(df.style.format({
+            "proposed_budget": "${:,.2f}",
+            "change_order": "${:,.2f}",
+            "revised_budget": "${:,.2f}"
+        }))
 
 # --- Batch Entry View ---
 def render_batch_entry():
