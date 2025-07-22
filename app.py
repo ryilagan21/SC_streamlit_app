@@ -25,20 +25,37 @@ def check_password(username, password, users_df):
         return bcrypt.checkpw(password.encode(), stored_hash.encode())
     return False
 
+# --- Initialize session state ---
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+
 # --- Login UI ---
-st.title("🔐 Secure Login")
-username = st.text_input("Username")
-password = st.text_input("Password", type="password")
+if not st.session_state.logged_in:
+    st.title("🔐 Secure Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    users_df = load_users()
 
-users_df = load_users()
+    if st.button("Login"):
+        if check_password(username, password, users_df):
+            st.session_state.logged_in = True
+            st.session_state.username = username
+            st.success(f"Welcome, {username}!")
+        else:
+            st.error("Invalid username or password.")
 
-if st.button("Login"):
-    if check_password(username, password, users_df):
-        st.success(f"Welcome, {username}!")
-        # --- Your main app content goes here ---
-        st.write("This is your protected app content.")
-    else:
-        st.error("Invalid username or password.")
+# --- Protected App Content ---
+if st.session_state.logged_in:
+    st.title("📊 Protected App")
+    st.write(f"Hello, {st.session_state.username}! Here's your secure content.")
+    # Your app logic goes here
+
+    if st.button("Logout"):
+        st.session_state.logged_in = False
+        st.session_state.username = ""
+        st.experimental_rerun()
+
 
 
 # --- Constants ---
