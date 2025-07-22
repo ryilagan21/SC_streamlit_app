@@ -2,3 +2,7 @@ streamlit
 pandas
 python-docx
 Pillow
+streamlit
+pandas
+openpyxl
+O365
