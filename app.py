@@ -8,6 +8,39 @@ import io
 from docx import Document
 import os
 
+import streamlit as st
+import pandas as pd
+import bcrypt
+
+# --- Load users from Excel ---
+@st.cache_data
+def load_users():
+    df = pd.read_excel("users.xlsx")
+    return df
+
+def check_password(username, password, users_df):
+    user_row = users_df[users_df['username'] == username]
+    if not user_row.empty:
+        stored_hash = user_row.iloc[0]['password_hash']
+        return bcrypt.checkpw(password.encode(), stored_hash.encode())
+    return False
+
+# --- Login UI ---
+st.title("🔐 Secure Login")
+username = st.text_input("Username")
+password = st.text_input("Password", type="password")
+
+users_df = load_users()
+
+if st.button("Login"):
+    if check_password(username, password, users_df):
+        st.success(f"Welcome, {username}!")
+        # --- Your main app content goes here ---
+        st.write("This is your protected app content.")
+    else:
+        st.error("Invalid username or password.")
+
+
 # --- Constants ---
 STATUS_OPTIONS = ["Not started", "Underwriting", "Initial Review", "LOI", "Second Review", "PSA", "No Go"]
 PROPERTY_TYPES = ["BTR", "Commercial", "Industrial", "Mixed-use", "Multi-family", "Single-family", "Town Homes"]
