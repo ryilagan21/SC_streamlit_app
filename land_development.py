@@ -28,15 +28,16 @@ conn.commit()
 def render_add_entry():
     st.header("➕ Add Land Development Entry")
 
+    # Move classification outside the form for dynamic control
+    classification = st.selectbox("Classification", ["Proposed Budget", "Change Order"])
+
     with st.form("add_entry_form"):
         community = st.text_input("Community")
         location = st.text_input("Location")
         budget_item = st.text_input("Budget Item")
         contractor = st.text_input("Contractor")
 
-        classification = st.selectbox("Classification", ["Proposed Budget", "Change Order"])
-
-        # Conditional input fields
+        # Dynamically render budget fields
         if classification == "Proposed Budget":
             proposed_budget = st.number_input("Proposed Budget", min_value=0.0, format="%.2f")
             change_order = 0.0
@@ -77,6 +78,7 @@ def render_budget_summary():
     if df.empty:
         st.info("No data available.")
         return
+
     summary = df.groupby(["community", "contractor"]).agg({
         "proposed_budget": "sum",
         "change_order": "sum",
@@ -91,33 +93,38 @@ def render_budget_summary():
     }))
 # --- Edit Entry Form ---
 def render_edit_form(row):
+    st.write("📝 Edit Entry")
+
+    # Move classification outside the form for dynamic control
+    classification = st.selectbox(
+        "Classification",
+        ["Proposed Budget", "Change Order"],
+        index=["Proposed Budget", "Change Order"].index(row["classification"])
+    )
+
     with st.form(f"edit_form_{row['id']}"):
-        st.write("📝 Edit Entry")
         community = st.text_input("Community", value=row["community"])
         location = st.text_input("Location", value=row["location"])
         budget_item = st.text_input("Budget Item", value=row["budget_item"])
         contractor = st.text_input("Contractor", value=row["contractor"])
 
-        classification = st.selectbox("Classification", ["Proposed Budget", "Change Order"],
-                                      index=["Proposed Budget", "Change Order"].index(row["classification"]))
-
-        # Initialize budget fields
-        proposed_budget = 0.0
-        change_order = 0.0
-
         # Dynamically render budget fields
         if classification == "Proposed Budget":
             proposed_budget = st.number_input("Proposed Budget", value=row["proposed_budget"], format="%.2f")
+            change_order = 0.0
             st.number_input("Change Order", value=row["change_order"], disabled=True, format="%.2f")
         else:
+            proposed_budget = 0.0
             st.number_input("Proposed Budget", value=row["proposed_budget"], disabled=True, format="%.2f")
             change_order = st.number_input("Change Order", value=row["change_order"], format="%.2f")
 
         revised_budget = st.number_input("Revised Budget", value=row["revised_budget"], format="%.2f")
-        status = st.selectbox("Status", ["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"],
-                              index=["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"].index(row["status"]))
+        status = st.selectbox(
+            "Status",
+            ["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"],
+            index=["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"].index(row["status"])
+        )
 
-        # Handle optional date
         date_executed = pd.to_datetime(row["date_executed"]) if row["date_executed"] else None
         date_optional = st.checkbox("Specify Date Executed", value=bool(date_executed))
         date_input = st.date_input("Date Executed", value=date_executed or pd.to_datetime("today"), disabled=not date_optional)
@@ -139,7 +146,6 @@ def render_edit_form(row):
         ))
         conn.commit()
         st.success("✅ Entry updated.")
-
 
 # --- Details View ---
 def render_details_view():
