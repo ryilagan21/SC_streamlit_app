@@ -1,5 +1,3 @@
-# land_development.py (Part 1)
-
 import streamlit as st
 import pandas as pd
 import sqlite3
@@ -11,7 +9,7 @@ def get_connection():
     conn = sqlite3.connect("deals.db", check_same_thread=False)
     conn.execute('''
         CREATE TABLE IF NOT EXISTS land_development (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            LD_PK INTEGER PRIMARY KEY AUTOINCREMENT,
             community TEXT,
             location TEXT,
             budget_item TEXT,
@@ -43,7 +41,7 @@ def render_add_entry():
 
         proposed_budget = st.number_input("Proposed Budget", min_value=0.0, format="%.2f", disabled=(classification != "Proposed Budget"))
         change_order = st.number_input("Change Order", min_value=0.0, format="%.2f", disabled=(classification != "Change Order"))
-        revised_budget = st.number_input("Revised Budget", min_value=0.0, format="%.2f")
+        revised_budget = proposed_budget + change_order
         status = st.selectbox("Status", ["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"])
         date_optional = st.checkbox("Specify Date Executed")
         date_executed = st.date_input("Date Executed", disabled=not date_optional)
@@ -70,8 +68,6 @@ def render_add_entry():
             st.success("✅ Entry added successfully.")
         except Exception as e:
             st.error(f"❌ Failed to add entry: {e}")
-# land_development.py (Part 2)
-
 # --- Safe Currency Formatter ---
 def safe_currency(value):
     try:
@@ -108,7 +104,7 @@ def render_budget_summary():
 def render_edit_form(row):
     st.write("📝 Edit Entry")
 
-    unique_id = row["id"]
+    unique_id = row["LD_PK"]
 
     classification = st.selectbox(
         "Classification",
@@ -125,7 +121,7 @@ def render_edit_form(row):
 
         proposed_budget = st.number_input("Proposed Budget", value=row["proposed_budget"], format="%.2f", disabled=(classification != "Proposed Budget"), key=f"proposed_budget_{unique_id}")
         change_order = st.number_input("Change Order", value=row["change_order"], format="%.2f", disabled=(classification != "Change Order"), key=f"change_order_{unique_id}")
-        revised_budget = st.number_input("Revised Budget", value=row["revised_budget"], format="%.2f", key=f"revised_budget_{unique_id}")
+        revised_budget = proposed_budget + change_order
 
         status = st.selectbox(
             "Status",
@@ -146,7 +142,7 @@ def render_edit_form(row):
             UPDATE land_development SET
                 community=?, location=?, budget_item=?, contractor=?, classification=?,
                 proposed_budget=?, change_order=?, revised_budget=?, status=?, date_executed=?
-            WHERE id=?
+            WHERE LD_PK=?
         ''', (
             community, location, budget_item, contractor, classification,
             proposed_budget, change_order, revised_budget, status, date_value,
@@ -197,23 +193,18 @@ def render_details_view():
 
     for group in paginated_groups:
         first_row = group.iloc[0]
-        with st.container():
-            cols = st.columns([1.5, 1.5, 1.5, 1.5, 1, 1, 1, 1])
-            cols[0].write(first_row["community"])
-            cols[1].write(first_row["location"])
-            cols[2].write(first_row["budget_item"])
-            cols[3].write(first_row["contractor"])
-            cols[4].write(safe_currency(first_row["proposed_budget"]))
-            cols[5].write(safe_currency(first_row["change_order"]))
-            cols[6].write(safe_currency(first_row["revised_budget"]))
-            cols[7].markdown("➕", unsafe_allow_html=True)
+        total_proposed = group["proposed_budget"].sum()
+        total_change_order = group["change_order"].sum()
+        total_revised = total_proposed + total_change_order
 
-            with st.expander("View Versions"):
-                for _, row in group.iterrows():
-                    st.dataframe(pd.DataFrame([row]))
-                    render_edit_form(row)
-# land_development.py (Part 3)
+        with st.expander(f"➕ {first_row['community']} | {first_row['location']} | {first_row['budget_item']} | {first_row['contractor']}"):
+            st.write(f"**Total Proposed:** {safe_currency(total_proposed)}")
+            st.write(f"**Total Change Order:** {safe_currency(total_change_order)}")
+            st.write(f"**Total Revised:** {safe_currency(total_revised)}")
 
+            for _, row in group.iterrows():
+                st.dataframe(pd.DataFrame([row]))
+                render_edit_form(row)
 # --- Preview All View ---
 def render_preview_all():
     st.header("📁 Preview All Entries")
@@ -230,7 +221,7 @@ def render_batch_entry():
 
     template_df = pd.DataFrame(columns=[
         "community", "location", "budget_item", "contractor", "classification",
-        "proposed_budget", "change_order", "revised_budget", "status", "date_executed"
+        "proposed_budget", "change_order", "status", "date_executed"
     ])
 
     buffer = io.BytesIO()
@@ -246,6 +237,14 @@ def render_batch_entry():
 
     uploaded_file = st.file_uploader("Upload filled Excel file", type=["xlsx"])
 
+    def clean_float(value):
+        if pd.isnull(value):
+            return 0.0
+        try:
+            return float(str(value).strip().replace("-", "").replace("—", "").replace("N/A", ""))
+        except ValueError:
+            return 0.0
+
     if uploaded_file:
         try:
             df = pd.read_excel(uploaded_file)
@@ -257,9 +256,9 @@ def render_batch_entry():
 
             for _, row in df.iterrows():
                 try:
-                    proposed_budget = float(row["proposed_budget"]) if pd.notnull(row["proposed_budget"]) else 0.0
-                    change_order = float(row["change_order"]) if pd.notnull(row["change_order"]) else 0.0
-                    revised_budget = float(row["revised_budget"]) if pd.notnull(row["revised_budget"]) else 0.0
+                    proposed_budget = clean_float(row["proposed_budget"])
+                    change_order = clean_float(row["change_order"])
+                    revised_budget = proposed_budget + change_order
                     date_value = pd.to_datetime(row["date_executed"]).strftime("%Y-%m-%d") if pd.notnull(row["date_executed"]) else None
 
                     cursor.execute('''
