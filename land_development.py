@@ -108,23 +108,35 @@ def render_budget_summary():
 def render_edit_form(row):
     st.write("📝 Edit Entry")
 
-    classification = st.selectbox("Classification", ["Proposed Budget", "Change Order"], index=["Proposed Budget", "Change Order"].index(row["classification"]))
+    unique_id = row["id"]
 
-    with st.form(f"edit_form_{row['id']}"):
-        community = st.text_input("Community", value=row["community"])
-        location = st.text_input("Location", value=row["location"])
-        budget_item = st.text_input("Budget Item", value=row["budget_item"])
-        contractor = st.text_input("Contractor", value=row["contractor"])
+    classification = st.selectbox(
+        "Classification",
+        ["Proposed Budget", "Change Order"],
+        index=["Proposed Budget", "Change Order"].index(row["classification"]),
+        key=f"classification_{unique_id}"
+    )
 
-        proposed_budget = st.number_input("Proposed Budget", value=row["proposed_budget"], format="%.2f", disabled=(classification != "Proposed Budget"))
-        change_order = st.number_input("Change Order", value=row["change_order"], format="%.2f", disabled=(classification != "Change Order"))
-        revised_budget = st.number_input("Revised Budget", value=row["revised_budget"], format="%.2f")
+    with st.form(f"edit_form_{unique_id}"):
+        community = st.text_input("Community", value=row["community"], key=f"community_{unique_id}")
+        location = st.text_input("Location", value=row["location"], key=f"location_{unique_id}")
+        budget_item = st.text_input("Budget Item", value=row["budget_item"], key=f"budget_item_{unique_id}")
+        contractor = st.text_input("Contractor", value=row["contractor"], key=f"contractor_{unique_id}")
 
-        status = st.selectbox("Status", ["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"], index=["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"].index(row["status"]))
+        proposed_budget = st.number_input("Proposed Budget", value=row["proposed_budget"], format="%.2f", disabled=(classification != "Proposed Budget"), key=f"proposed_budget_{unique_id}")
+        change_order = st.number_input("Change Order", value=row["change_order"], format="%.2f", disabled=(classification != "Change Order"), key=f"change_order_{unique_id}")
+        revised_budget = st.number_input("Revised Budget", value=row["revised_budget"], format="%.2f", key=f"revised_budget_{unique_id}")
+
+        status = st.selectbox(
+            "Status",
+            ["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"],
+            index=["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"].index(row["status"]),
+            key=f"status_{unique_id}"
+        )
 
         date_executed = pd.to_datetime(row["date_executed"]) if row["date_executed"] else None
-        date_optional = st.checkbox("Specify Date Executed", value=bool(date_executed))
-        date_input = st.date_input("Date Executed", value=date_executed or pd.to_datetime("today"), disabled=not date_optional)
+        date_optional = st.checkbox("Specify Date Executed", value=bool(date_executed), key=f"date_optional_{unique_id}")
+        date_input = st.date_input("Date Executed", value=date_executed or pd.to_datetime("today"), disabled=not date_optional, key=f"date_input_{unique_id}")
 
         save = st.form_submit_button("💾 Save Changes")
 
@@ -138,7 +150,7 @@ def render_edit_form(row):
         ''', (
             community, location, budget_item, contractor, classification,
             proposed_budget, change_order, revised_budget, status, date_value,
-            row["id"]
+            unique_id
         ))
         conn.commit()
         st.success("✅ Entry updated.")
@@ -167,6 +179,7 @@ def render_details_view():
         if classification_filter != "All" and classification_filter not in group["classification"].values: return False
         if status_filter != "All" and status_filter not in group["status"].values: return False
         return True
+
     grouped = df.groupby(["community", "location", "budget_item", "contractor"])
     filtered_groups = [group for _, group in grouped if matches_filters(group)]
 
@@ -284,4 +297,3 @@ def render_land_development_ui():
         render_add_entry()
     elif view == "Batch Entry":
         render_batch_entry()
-
