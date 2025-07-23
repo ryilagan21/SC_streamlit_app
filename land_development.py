@@ -2,19 +2,30 @@ import streamlit as st
 import pandas as pd
 from supabase import create_client
 from datetime import date
+import io
 
 # --- Supabase Connection ---
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 supabase = create_client(url, key)
 
-# --- Load Data ---
+# --- Load Data Safely ---
 @st.cache_data(ttl=10)
 def load_data():
     response = supabase.table("land_development").select("*").execute()
     df = pd.DataFrame(response.data)
+
+    expected_columns = [
+        "LD_PK", "community", "location", "budget_item", "contractor", "classification",
+        "proposed_budget", "change_order", "revised_budget", "status", "date_executed"
+    ]
+    for col in expected_columns:
+        if col not in df.columns:
+            df[col] = None
+
     for col in ["proposed_budget", "change_order", "revised_budget"]:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+
     return df
 
 # --- Safe Currency Formatter ---
@@ -51,7 +62,6 @@ def render_add_entry():
             return
 
         date_value = date_executed.strftime("%Y-%m-%d") if date_optional else None
-
         try:
             supabase.table("land_development").insert({
                 "community": community,
@@ -69,6 +79,7 @@ def render_add_entry():
             st.rerun()
         except Exception as e:
             st.error(f"❌ Failed to add entry: {e}")
+
 # --- Inline Edit Form ---
 def render_inline_edit_form(row):
     unique_id = row["LD_PK"]
@@ -77,12 +88,12 @@ def render_inline_edit_form(row):
     if st.session_state.get(edit_key, False):
         with st.form(f"edit_form_{unique_id}"):
             classification = st.selectbox("Classification", ["Proposed Budget", "Change Order"],
-                                          index=["Proposed Budget", "Change Order"].index(row["classification"]),
+                                          index=["Proposed Budget", "Change Order"].index(row.get("classification", "Proposed Budget")),
                                           key=f"classification_{unique_id}")
 
-            community = st.text_input("Community", value=row["community"], key=f"community_{unique_id}")
-            location = st.text_input("Location", value=row["location"], key=f"location_{unique_id}")
-            budget_item = st.text_input("Budget Item", value=row["budget_item"], key=f"budget_item_{unique_id}")
+            community = st.text_input("Community", value=row.get("community", ""), key=f"community_{unique_id}")
+            location = st.text_input("Location", value=row.get("location", ""), key=f"location_{unique_id}")
+            budget_item = st.text_input("Budget Item", value=row.get("budget_item", ""), key=f"budget_item_{unique_id}")
             contractor = st.text_input("Contractor", value=row.get("contractor", ""), key=f"contractor_{unique_id}")
 
             proposed_budget = st.number_input("Proposed Budget", value=safe_currency(row.get("proposed_budget")),
@@ -94,7 +105,7 @@ def render_inline_edit_form(row):
             revised_budget = proposed_budget + change_order
 
             status = st.selectbox("Status", ["Proposal Received", "Document Approved", "Sent For signature", "Contract Executed"],
-                                  index=["Proposal Received", "Document Approved", "Sent For signature", "Contract Executed"].index(row["status"]),
+                                  index=["Proposal Received", "Document Approved", "Sent For signature", "Contract Executed"].index(row.get("status", "Proposal Received")),
                                   key=f"status_{unique_id}")
 
             date_executed = pd.to_datetime(row["date_executed"]) if row["date_executed"] else None
@@ -136,16 +147,18 @@ def render_inline_edit_form(row):
         elif cancel:
             st.session_state[edit_key] = False
             st.rerun()
-
     else:
         st.dataframe(pd.DataFrame([row]))
         if st.button("✏️ Edit", key=f"edit_button_{unique_id}"):
             st.session_state[edit_key] = True
-
 # --- Details View ---
 def render_details_view():
     st.header("📋 Development Details")
     df = load_data()
+
+    if df.empty:
+        st.warning("No data available.")
+        return
 
     with st.expander("🔍 Filters", expanded=True):
         col1, col2, col3 = st.columns(3)
@@ -176,7 +189,7 @@ def render_details_view():
         st.warning("No matching records found.")
         return
 
-    grouped = df.groupby(["community", "location", "budget_item", "contractor"])
+    grouped = df.groupby(["community", "location", "budget_item", "contractor"], dropna=False)
     for group_key, group in grouped:
         first_row = group.iloc[0]
         total_proposed = group["proposed_budget"].sum()
@@ -190,6 +203,7 @@ def render_details_view():
 
             for _, row in group.iterrows():
                 render_inline_edit_form(row)
+
 # --- Budget Summary View ---
 def render_budget_summary():
     st.header("📊 Budget Summary")
@@ -199,7 +213,7 @@ def render_budget_summary():
         st.info("No data available.")
         return
 
-    grouped = df.groupby(["community", "contractor"])
+    grouped = df.groupby(["community", "contractor"], dropna=False)
     summary_rows = []
 
     for (community, contractor), group in grouped:
@@ -232,11 +246,15 @@ def render_budget_summary():
         if col5.button(f"${row['Total Revised']:,.2f}", key=f"rev_{i}"):
             st.info("**Revised Budget Details**")
             st.dataframe(row["Group"][["budget_item", "revised_budget"]])
-
 # --- Pending Contracts View ---
 def render_pending_contracts():
     st.header("📌 Pending Contracts")
     df = load_data()
+
+    if df.empty or "status" not in df.columns:
+        st.info("No pending contracts.")
+        return
+
     df = df[df["status"] != "Contract Executed"]
 
     status_order = {
@@ -245,7 +263,7 @@ def render_pending_contracts():
         "Sent For signature": 2
     }
 
-    df["status_rank"] = df["status"].map(status_order)
+    df["status_rank"] = df["status"].map(status_order).fillna(99)
     df = df.sort_values(by="status_rank")
 
     def get_status_color(status):
@@ -260,12 +278,17 @@ def render_pending_contracts():
     if df.empty:
         st.info("No pending contracts.")
     else:
-        display_df = df[["status", "community", "contractor", "budget_item", "proposed_budget", "change_order", "revised_budget"]]
+        display_df = df[[
+            "status", "community", "contractor", "budget_item",
+            "proposed_budget", "change_order", "revised_budget"
+        ]].copy()
+
         styled_df = display_df.style.applymap(get_status_color, subset=["status"]).format({
             "proposed_budget": "${:,.2f}",
             "change_order": "${:,.2f}",
             "revised_budget": "${:,.2f}"
         })
+
         st.dataframe(styled_df)
 
 # --- Preview All View ---
@@ -276,13 +299,12 @@ def render_preview_all():
     if df.empty:
         st.info("No entries found.")
     else:
-        st.dataframe(df.style.format({
+        styled_df = df.style.format({
             "proposed_budget": "${:,.2f}",
             "change_order": "${:,.2f}",
             "revised_budget": "${:,.2f}"
-        }))
-import io
-
+        })
+        st.dataframe(styled_df)
 # --- Batch Entry View ---
 def render_batch_entry():
     st.header("📥 Batch Entry")
@@ -340,15 +362,15 @@ def render_batch_entry():
                     try:
                         date_value = pd.to_datetime(row["date_executed"]).strftime("%Y-%m-%d") if pd.notnull(row["date_executed"]) else None
                         supabase.table("land_development").insert({
-                            "community": row["community"],
-                            "location": row["location"],
-                            "budget_item": row["budget_item"],
-                            "contractor": row["contractor"] if pd.notnull(row["contractor"]) else None,
-                            "classification": row["classification"],
-                            "proposed_budget": row["proposed_budget"] if row["classification"] == "Proposed Budget" else None,
-                            "change_order": row["change_order"] if row["classification"] == "Change Order" else None,
+                            "community": row.get("community"),
+                            "location": row.get("location"),
+                            "budget_item": row.get("budget_item"),
+                            "contractor": row.get("contractor") if pd.notnull(row.get("contractor")) else None,
+                            "classification": row.get("classification"),
+                            "proposed_budget": row["proposed_budget"] if row.get("classification") == "Proposed Budget" else None,
+                            "change_order": row["change_order"] if row.get("classification") == "Change Order" else None,
                             "revised_budget": row["revised_budget"],
-                            "status": row["status"],
+                            "status": row.get("status"),
                             "date_executed": date_value
                         }).execute()
                     except Exception as row_error:
