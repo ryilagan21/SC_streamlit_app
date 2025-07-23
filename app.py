@@ -1,3 +1,5 @@
+# Part 1: Setup, Authentication, and Navigation
+
 import streamlit as st
 import pandas as pd
 import bcrypt
@@ -23,7 +25,7 @@ if "deal_saved" not in st.session_state:
 
 # Authentication
 def check_password(username, password):
-    response = supabase.table("users").select("*").eq("user_name", username).execute()
+    response = supabase.table("users").select("*").eq("username", username).execute()
     users = response.data
     if not users:
         return False
@@ -55,6 +57,8 @@ view = st.sidebar.selectbox("Choose a view", [
     "Preview Deals Table",
     "LOI Creation"
 ])
+# Part 2: Search Properties View and Edit Functionality
+
 def get_deal(pk):
     response = supabase.table("deals").select("*").eq("pk", pk).execute()
     return response.data[0] if response.data else None
@@ -84,7 +88,6 @@ def paginate_dataframe(df, page_size=10):
         st.session_state.page = page + 1
         st.rerun()
     return df.iloc[start:end], page
-
 if view == "Search Properties":
     st.header("🔍 Search Properties")
     activity_filter = st.selectbox("Activity", ["Active", "No Go", "All"])
@@ -173,12 +176,23 @@ if view == "Search Properties":
                     st.success("✅ Changes saved.")
                     del st.session_state.edit_pk
                     st.rerun()
+
                 elif cancel:
                     del st.session_state.edit_pk
                     st.info("🛑 Edit canceled.")
                     st.rerun()
+# Part 3: Add New Deal and Preview Deals Table
+
+def generate_new_pk():
+    from uuid import uuid4
+    return str(uuid4())
+
+def is_duplicate_deal(name, location, prop_type, size):
+    response = supabase.table("deals").select("pk").eq("property_name", name).eq("location", location).eq("property_type", prop_type).eq("size", size).execute()
+    return len(response.data) > 0
+
 # --- Add New Deal ---
-elif view == "Add New Deal":
+if view == "Add New Deal":
     st.header("➕ Add New Deal")
     if st.session_state.deal_saved:
         st.success("🎉 Deal added successfully.")
@@ -236,11 +250,17 @@ elif view == "Preview Deals Table":
     response = supabase.table("deals").select("*").execute()
     full_df = pd.DataFrame(response.data)
     st.dataframe(full_df)
+# Part 4: LOI Creation View
 
-# --- LOI Creation ---
 elif view == "LOI Creation":
     st.header("📄 LOI Creation")
-    response = supabase.table("deals").select("pk, property_name").in_("status", ["LOI", "Second Review", "PSA"]).order("pk", desc=True).execute()
+
+    response = supabase.table("deals") \
+        .select("pk, property_name") \
+        .in_("status", ["LOI", "Second Review", "PSA"]) \
+        .order("pk", desc=True) \
+        .execute()
+
     deals = response.data
     deal_options = {f"{d['pk']} - {d['property_name']}": d["pk"] for d in deals}
 
@@ -271,3 +291,7 @@ elif view == "LOI Creation":
             notes = st.text_area("Notes (optional)")
 
             submit = st.form_submit_button("📝 Generate LOI")
+
+        if submit:
+            st.success("✅ LOI data captured. You can now generate a document or save it.")
+    
