@@ -1,5 +1,3 @@
-# Part 1: Setup, Authentication, and Navigation
-
 import streamlit as st
 import pandas as pd
 import bcrypt
@@ -57,8 +55,6 @@ view = st.sidebar.selectbox("Choose a view", [
     "Preview Deals Table",
     "LOI Creation"
 ])
-# Part 2: Search Properties View
-
 def get_deal(pk):
     response = supabase.table("deals").select("*").eq("pk", pk).execute()
     return response.data[0] if response.data else None
