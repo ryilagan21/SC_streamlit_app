@@ -1,32 +1,21 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
-import io
+from supabase import create_client
+from datetime import date
 
-# --- Cached DB Connection ---
-@st.cache_resource
-def get_connection():
-    conn = sqlite3.connect("deals.db", check_same_thread=False)
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS land_development (
-            LD_PK INTEGER PRIMARY KEY AUTOINCREMENT,
-            community TEXT,
-            location TEXT,
-            budget_item TEXT,
-            contractor TEXT,
-            classification TEXT,
-            proposed_budget REAL,
-            change_order REAL,
-            revised_budget REAL,
-            status TEXT,
-            date_executed TEXT
-        )
-    ''')
-    conn.commit()
-    return conn
+# --- Supabase Connection ---
+url = st.secrets["SUPABASE_URL"]
+key = st.secrets["SUPABASE_KEY"]
+supabase = create_client(url, key)
 
-conn = get_connection()
-cursor = conn.cursor()
+# --- Load Data ---
+@st.cache_data(ttl=10)
+def load_data():
+    response = supabase.table("land_development").select("*").execute()
+    df = pd.DataFrame(response.data)
+    for col in ["proposed_budget", "change_order", "revised_budget"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+    return df
 
 # --- Safe Currency Formatter ---
 def safe_currency(value):
@@ -34,14 +23,6 @@ def safe_currency(value):
         return float(value)
     except (ValueError, TypeError):
         return 0.0
-
-# --- Load Data ---
-@st.cache_data(ttl=10)
-def load_data():
-    df = pd.read_sql_query("SELECT * FROM land_development", conn)
-    for col in ["proposed_budget", "change_order", "revised_budget"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-    return df
 
 # --- Add Entry View ---
 def render_add_entry():
@@ -57,9 +38,10 @@ def render_add_entry():
         proposed_budget = st.number_input("Proposed Budget", min_value=0.0, format="%.2f", disabled=(classification != "Proposed Budget"))
         change_order = st.number_input("Change Order", min_value=0.0, format="%.2f", disabled=(classification != "Change Order"))
         revised_budget = proposed_budget + change_order
+
         status = st.selectbox("Status", ["Proposal Received", "Document Approved", "Sent For signature", "Contract Executed"])
         date_optional = st.checkbox("Specify Date Executed")
-        date_executed = st.date_input("Date Executed", disabled=not date_optional)
+        date_executed = st.date_input("Date Executed", value=date.today(), disabled=not date_optional)
 
         submit = st.form_submit_button("✅ Save Entry")
 
@@ -69,17 +51,20 @@ def render_add_entry():
             return
 
         date_value = date_executed.strftime("%Y-%m-%d") if date_optional else None
+
         try:
-            cursor.execute('''
-                INSERT INTO land_development (
-                    community, location, budget_item, contractor, classification,
-                    proposed_budget, change_order, revised_budget, status, date_executed
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                community, location, budget_item, contractor, classification,
-                proposed_budget, change_order, revised_budget, status, date_value
-            ))
-            conn.commit()
+            supabase.table("land_development").insert({
+                "community": community,
+                "location": location,
+                "budget_item": budget_item,
+                "contractor": contractor if contractor else None,
+                "classification": classification,
+                "proposed_budget": proposed_budget if classification == "Proposed Budget" else None,
+                "change_order": change_order if classification == "Change Order" else None,
+                "revised_budget": revised_budget,
+                "status": status,
+                "date_executed": date_value
+            }).execute()
             st.success("✅ Entry added successfully.")
             st.rerun()
         except Exception as e:
@@ -98,12 +83,12 @@ def render_inline_edit_form(row):
             community = st.text_input("Community", value=row["community"], key=f"community_{unique_id}")
             location = st.text_input("Location", value=row["location"], key=f"location_{unique_id}")
             budget_item = st.text_input("Budget Item", value=row["budget_item"], key=f"budget_item_{unique_id}")
-            contractor = st.text_input("Contractor", value=row["contractor"], key=f"contractor_{unique_id}")
+            contractor = st.text_input("Contractor", value=row.get("contractor", ""), key=f"contractor_{unique_id}")
 
-            proposed_budget = st.number_input("Proposed Budget", value=safe_currency(row["proposed_budget"]),
+            proposed_budget = st.number_input("Proposed Budget", value=safe_currency(row.get("proposed_budget")),
                                               format="%.2f", disabled=(classification != "Proposed Budget"),
                                               key=f"proposed_budget_{unique_id}")
-            change_order = st.number_input("Change Order", value=safe_currency(row["change_order"]),
+            change_order = st.number_input("Change Order", value=safe_currency(row.get("change_order")),
                                            format="%.2f", disabled=(classification != "Change Order"),
                                            key=f"change_order_{unique_id}")
             revised_budget = proposed_budget + change_order
@@ -127,18 +112,21 @@ def render_inline_edit_form(row):
                 return
 
             date_value = date_input.strftime("%Y-%m-%d") if date_optional else None
+
             try:
-                cursor.execute('''
-                    UPDATE land_development SET
-                        community=?, location=?, budget_item=?, contractor=?, classification=?,
-                        proposed_budget=?, change_order=?, revised_budget=?, status=?, date_executed=?
-                    WHERE LD_PK=?
-                ''', (
-                    community, location, budget_item, contractor, classification,
-                    proposed_budget, change_order, revised_budget, status, date_value,
-                    unique_id
-                ))
-                conn.commit()
+                supabase.table("land_development").update({
+                    "community": community,
+                    "location": location,
+                    "budget_item": budget_item,
+                    "contractor": contractor if contractor else None,
+                    "classification": classification,
+                    "proposed_budget": proposed_budget if classification == "Proposed Budget" else None,
+                    "change_order": change_order if classification == "Change Order" else None,
+                    "revised_budget": revised_budget,
+                    "status": status,
+                    "date_executed": date_value
+                }).eq("LD_PK", unique_id).execute()
+
                 st.success("✅ Entry updated.")
                 st.session_state[edit_key] = False
                 st.rerun()
@@ -293,6 +281,8 @@ def render_preview_all():
             "change_order": "${:,.2f}",
             "revised_budget": "${:,.2f}"
         }))
+import io
+
 # --- Batch Entry View ---
 def render_batch_entry():
     st.header("📥 Batch Entry")
@@ -349,19 +339,20 @@ def render_batch_entry():
                 for _, row in df.iterrows():
                     try:
                         date_value = pd.to_datetime(row["date_executed"]).strftime("%Y-%m-%d") if pd.notnull(row["date_executed"]) else None
-                        cursor.execute('''
-                            INSERT INTO land_development (
-                                community, location, budget_item, contractor, classification,
-                                proposed_budget, change_order, revised_budget, status, date_executed
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (
-                            row["community"], row["location"], row["budget_item"], row["contractor"],
-                            row["classification"], row["proposed_budget"], row["change_order"],
-                            row["revised_budget"], row["status"], date_value
-                        ))
+                        supabase.table("land_development").insert({
+                            "community": row["community"],
+                            "location": row["location"],
+                            "budget_item": row["budget_item"],
+                            "contractor": row["contractor"] if pd.notnull(row["contractor"]) else None,
+                            "classification": row["classification"],
+                            "proposed_budget": row["proposed_budget"] if row["classification"] == "Proposed Budget" else None,
+                            "change_order": row["change_order"] if row["classification"] == "Change Order" else None,
+                            "revised_budget": row["revised_budget"],
+                            "status": row["status"],
+                            "date_executed": date_value
+                        }).execute()
                     except Exception as row_error:
                         st.warning(f"Skipped row due to error: {row_error}")
-                conn.commit()
                 st.success("✅ Batch records uploaded successfully.")
                 st.rerun()
 
