@@ -77,7 +77,7 @@ def render_add_entry():
         except Exception as e:
             st.error(f"❌ Failed to add entry: {e}")
 
-# --- Budget Summary View (Expandable) ---
+# --- Budget Summary View (Table + Click-to-Expand) ---
 def render_budget_summary():
     st.header("📊 Budget Summary")
     df = pd.read_sql_query("SELECT * FROM land_development", conn)
@@ -90,22 +90,38 @@ def render_budget_summary():
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
     grouped = df.groupby(["community", "contractor"])
+    summary_rows = []
+
     for (community, contractor), group in grouped:
         total_proposed = group["proposed_budget"].sum()
         total_change = group["change_order"].sum()
         total_revised = group["revised_budget"].sum()
 
-        with st.expander(f"📍 {community} | {contractor}"):
-            col1, col2, col3 = st.columns(3)
-            if col1.button(f"${total_proposed:,.2f}", key=f"prop_{community}_{contractor}"):
-                st.write("**Proposed Budget Details**")
-                st.dataframe(group[["budget_item", "proposed_budget"]])
-            if col2.button(f"${total_change:,.2f}", key=f"chg_{community}_{contractor}"):
-                st.write("**Change Order Details**")
-                st.dataframe(group[["budget_item", "change_order"]])
-            if col3.button(f"${total_revised:,.2f}", key=f"rev_{community}_{contractor}"):
-                st.write("**Revised Budget Details**")
-                st.dataframe(group[["budget_item", "revised_budget"]])
+        summary_rows.append({
+            "Community": community,
+            "Contractor": contractor,
+            "Total Proposed": total_proposed,
+            "Total Change Order": total_change,
+            "Total Revised": total_revised,
+            "Group": group
+        })
+
+    for i, row in enumerate(summary_rows):
+        col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 2])
+        col1.write(f"**{row['Community']}**")
+        col2.write(f"**{row['Contractor']}**")
+
+        if col3.button(f"${row['Total Proposed']:,.2f}", key=f"prop_{i}"):
+            st.info("**Proposed Budget Details**")
+            st.dataframe(row["Group"][["budget_item", "proposed_budget"]])
+
+        if col4.button(f"${row['Total Change Order']:,.2f}", key=f"chg_{i}"):
+            st.info("**Change Order Details**")
+            st.dataframe(row["Group"][["budget_item", "change_order"]])
+
+        if col5.button(f"${row['Total Revised']:,.2f}", key=f"rev_{i}"):
+            st.info("**Revised Budget Details**")
+            st.dataframe(row["Group"][["budget_item", "revised_budget"]])
 # --- Inline Edit Form ---
 def render_inline_edit_form(row):
     unique_id = row["LD_PK"]
@@ -113,9 +129,11 @@ def render_inline_edit_form(row):
 
     if st.session_state.get(edit_key, False):
         with st.form(f"edit_form_{unique_id}"):
-            classification = st.selectbox("Classification", ["Proposed Budget", "Change Order"],
-                                          index=["Proposed Budget", "Change Order"].index(row.get("classification", "Proposed Budget")),
-                                          key=f"classification_{unique_id}")
+            classification_value = row.get("classification", "Proposed Budget")
+            classification_options = ["Proposed Budget", "Change Order"]
+            classification_index = classification_options.index(classification_value) if classification_value in classification_options else 0
+
+            classification = st.selectbox("Classification", classification_options, index=classification_index, key=f"classification_{unique_id}")
 
             community = st.text_input("Community", value=row["community"], key=f"community_{unique_id}")
             location = st.text_input("Location", value=row["location"], key=f"location_{unique_id}")
@@ -128,10 +146,11 @@ def render_inline_edit_form(row):
                                            disabled=(classification != "Change Order"), key=f"change_order_{unique_id}")
             revised_budget = proposed_budget + change_order
 
-            status = st.selectbox("Status",
-                                  ["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"],
-                                  index=["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"].index(row.get("status", "Proposal Received")),
-                                  key=f"status_{unique_id}")
+            status_value = row.get("status", "Proposal Received")
+            status_options = ["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"]
+            status_index = status_options.index(status_value) if status_value in status_options else 0
+
+            status = st.selectbox("Status", status_options, index=status_index, key=f"status_{unique_id}")
 
             date_executed = pd.to_datetime(row["date_executed"]) if row["date_executed"] else None
             date_optional = st.checkbox("Specify Date Executed", value=bool(date_executed), key=f"date_optional_{unique_id}")
@@ -244,11 +263,11 @@ def render_pending_contracts():
 
     def get_status_color(status):
         if status == "Proposal Received":
-            return "background-color: lightgray"
+            return "background-color: lightgray; font-weight: bold"
         elif status == "Document Approved":
-            return "background: linear-gradient(90deg, yellow 50%, lightgray 50%)"
+            return "background: linear-gradient(90deg, yellow 50%, lightgray 50%); font-weight: bold"
         elif status == "Sent For signature":
-            return "background-color: yellow"
+            return "background-color: yellow; font-weight: bold"
         return ""
 
     if df.empty:
