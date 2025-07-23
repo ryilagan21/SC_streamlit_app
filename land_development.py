@@ -75,10 +75,14 @@ def render_add_entry():
                 "status": status,
                 "date_executed": date_value
             }).execute()
-            st.success("✅ Entry added successfully.")
+            st.session_state["entry_success"] = True
             st.rerun()
         except Exception as e:
             st.error(f"❌ Failed to add entry: {e}")
+
+    if st.session_state.get("entry_success"):
+        st.success("✅ Entry added successfully.")
+        del st.session_state["entry_success"]
 
 # --- Inline Edit Form ---
 def render_inline_edit_form(row):
@@ -103,7 +107,6 @@ def render_inline_edit_form(row):
                                            format="%.2f", disabled=(classification != "Change Order"),
                                            key=f"change_order_{unique_id}")
             revised_budget = proposed_budget + change_order
-
             status = st.selectbox("Status", ["Proposal Received", "Document Approved", "Sent For signature", "Contract Executed"],
                                   index=["Proposal Received", "Document Approved", "Sent For signature", "Contract Executed"].index(row.get("status", "Proposal Received")),
                                   key=f"status_{unique_id}")
@@ -246,6 +249,7 @@ def render_budget_summary():
         if col5.button(f"${row['Total Revised']:,.2f}", key=f"rev_{i}"):
             st.info("**Revised Budget Details**")
             st.dataframe(row["Group"][["budget_item", "revised_budget"]])
+
 # --- Pending Contracts View ---
 def render_pending_contracts():
     st.header("📌 Pending Contracts")
@@ -290,7 +294,6 @@ def render_pending_contracts():
         })
 
         st.dataframe(styled_df)
-
 # --- Preview All View ---
 def render_preview_all():
     st.header("📁 Preview All Entries")
@@ -305,6 +308,7 @@ def render_preview_all():
             "revised_budget": "${:,.2f}"
         })
         st.dataframe(styled_df)
+
 # --- Batch Entry View ---
 def render_batch_entry():
     st.header("📥 Batch Entry")
@@ -344,7 +348,6 @@ def render_batch_entry():
             if not all(col in df.columns for col in required_columns):
                 st.error("❌ Uploaded file is missing required columns.")
                 return
-
             for col in ["proposed_budget", "change_order"]:
                 df[col] = df[col].apply(clean_float)
             df["revised_budget"] = df["proposed_budget"] + df["change_order"]
@@ -360,22 +363,25 @@ def render_batch_entry():
             if confirm.button("✅ Confirm Upload"):
                 for _, row in df.iterrows():
                     try:
+                        classification = str(row.get("classification", "")).strip().title()
                         date_value = pd.to_datetime(row["date_executed"]).strftime("%Y-%m-%d") if pd.notnull(row["date_executed"]) else None
+
                         supabase.table("land_development").insert({
                             "community": row.get("community"),
                             "location": row.get("location"),
                             "budget_item": row.get("budget_item"),
                             "contractor": row.get("contractor") if pd.notnull(row.get("contractor")) else None,
-                            "classification": row.get("classification"),
-                            "proposed_budget": row["proposed_budget"] if row.get("classification") == "Proposed Budget" else None,
-                            "change_order": row["change_order"] if row.get("classification") == "Change Order" else None,
+                            "classification": classification,
+                            "proposed_budget": row["proposed_budget"] if classification == "Proposed Budget" else None,
+                            "change_order": row["change_order"] if classification == "Change Order" else None,
                             "revised_budget": row["revised_budget"],
                             "status": row.get("status"),
                             "date_executed": date_value
                         }).execute()
                     except Exception as row_error:
                         st.warning(f"Skipped row due to error: {row_error}")
-                st.success("✅ Batch records uploaded successfully.")
+
+                st.session_state["batch_upload_success"] = True
                 st.rerun()
 
             elif cancel.button("❌ Cancel"):
@@ -384,6 +390,9 @@ def render_batch_entry():
         except Exception as e:
             st.error(f"❌ Error processing file: {e}")
 
+    if st.session_state.get("batch_upload_success"):
+        st.success("✅ Batch records uploaded successfully.")
+        del st.session_state["batch_upload_success"]
 # --- Route Views ---
 def render_land_development_ui():
     st.title("🏗️ Land Development")
