@@ -1,15 +1,18 @@
-# app.py
+# app.py (Part 1)
 
 import streamlit as st
-import sqlite3
 import pandas as pd
 from datetime import datetime
 import io
 from docx import Document
-import os
 import bcrypt
+from supabase import create_client
 import land_development
 
+# --- Supabase Connection ---
+url = st.secrets["SUPABASE_URL"]
+key = st.secrets["SUPABASE_KEY"]
+supabase = create_client(url, key)
 
 # --- Load users from Excel ---
 @st.cache_data
@@ -40,10 +43,9 @@ if not st.session_state.logged_in:
             st.session_state.logged_in = True
             st.session_state.username = username
             st.success(f"Welcome, {username}!")
-            st.stop()  # ✅ safer than rerun here
+            st.stop()
         else:
             st.error("Invalid username or password.")
-
 
 # --- Protected App Content ---
 if st.session_state.logged_in:
@@ -54,8 +56,7 @@ if st.session_state.logged_in:
     if st.button("Logout"):
         st.session_state.logged_in = False
         st.session_state.username = ""
-        st.stop()  # ✅ safer than rerun here too
-
+        st.stop()
 
     # --- Constants ---
     STATUS_OPTIONS = ["Not started", "Underwriting", "Initial Review", "LOI", "Second Review", "PSA", "No Go"]
@@ -65,79 +66,34 @@ if st.session_state.logged_in:
     if "deal_saved" not in st.session_state:
         st.session_state.deal_saved = False
 
-    # --- Database Setup ---
-    conn = sqlite3.connect("deals.db", check_same_thread=False)
-    cursor = conn.cursor()
-
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS deals (
-        pk TEXT PRIMARY KEY,
-        status TEXT,
-        property_name TEXT,
-        location TEXT,
-        property_type TEXT,
-        size TEXT,
-        asking_price TEXT,
-        proposed_price TEXT,
-        link TEXT,
-        receive_dt TEXT,
-        underwriting_dt TEXT,
-        initial_review_dt TEXT,
-        loi_dt TEXT,
-        second_review_dt TEXT,
-        psa_dt TEXT,
-        no_go_dt TEXT,
-        activity TEXT DEFAULT 'Active'
-    )
-    ''')
-
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS lois (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        deal_pk TEXT,
-        created_at TEXT,
-        sent_at TEXT,
-        received_at TEXT,
-        file_path TEXT,
-        notes TEXT,
-        FOREIGN KEY (deal_pk) REFERENCES deals(pk)
-    )
-    ''')
-
-    conn.commit()
     # --- Helper Functions ---
     def generate_new_pk():
         year = datetime.now().strftime("%Y")
-        cursor.execute("SELECT pk FROM deals WHERE pk LIKE ? ORDER BY pk DESC LIMIT 1", (f"{year}-%",))
-        last_pk = cursor.fetchone()
-        new_num = int(last_pk[0].split("-")[1]) + 1 if last_pk else 1
+        response = supabase.table("deals").select("pk").ilike(f"{year}-%").order("pk", desc=True).limit(1).execute()
+        last_pk = response.data[0]["pk"] if response.data else None
+        new_num = int(last_pk.split("-")[1]) + 1 if last_pk else 1
         return f"{year}-{new_num:04d}"
 
     def upsert_deal(data):
-        cursor.execute("SELECT pk FROM deals WHERE pk = ?", (data[0],))
-        if cursor.fetchone():
-            cursor.execute("""
-                UPDATE deals SET
-                status=?, property_name=?, location=?, property_type=?, size=?,
-                asking_price=?, proposed_price=?, link=?,
-                receive_dt=?, underwriting_dt=?, initial_review_dt=?, loi_dt=?,
-                second_review_dt=?, psa_dt=?, no_go_dt=?, activity=?
-                WHERE pk=?
-            """, data[1:] + (data[0],))
+        pk = data["pk"]
+        existing = supabase.table("deals").select("pk").eq("pk", pk).execute()
+        if existing.data:
+            supabase.table("deals").update(data).eq("pk", pk).execute()
         else:
-            cursor.execute("INSERT INTO deals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", data)
-        conn.commit()
+            supabase.table("deals").insert(data).execute()
 
     def get_deal(pk):
-        cursor.execute("SELECT * FROM deals WHERE pk = ?", (pk,))
-        return cursor.fetchone()
+        response = supabase.table("deals").select("*").eq("pk", pk).execute()
+        return response.data[0] if response.data else None
 
     def is_duplicate_deal(name, location, prop_type, size):
-        cursor.execute("""
-            SELECT 1 FROM deals
-            WHERE property_name = ? AND location = ? AND property_type = ? AND size = ?
-        """, (name, location, prop_type, size))
-        return cursor.fetchone() is not None
+        response = supabase.table("deals").select("pk").match({
+            "property_name": name,
+            "location": location,
+            "property_type": prop_type,
+            "size": size
+        }).execute()
+        return bool(response.data)
 
     def paginate_dataframe(df, items_per_page=5, label="Page"):
         total_items = len(df)
@@ -151,13 +107,6 @@ if st.session_state.logged_in:
         start_idx = (page - 1) * items_per_page
         return df.iloc[start_idx:start_idx + items_per_page], page
 
-    def sync_activity_column():
-        cursor.execute("SELECT pk, status FROM deals")
-        for pk, status in cursor.fetchall():
-            new_activity = "No Go" if status == "No Go" else "Active"
-            cursor.execute("UPDATE deals SET activity = ? WHERE pk = ?", (new_activity, pk))
-        conn.commit()
-
     def render_status_cell(status):
         color_map = {
             "Not started": ("#B0B0B0", 100),
@@ -166,7 +115,7 @@ if st.session_state.logged_in:
             "LOI": ("#AED581", 60),
             "Second Review": ("#66BB6A", 80),
             "PSA": ("#66BB6A", 100),
-            "No Go": ("#FF6961",100),
+            "No Go": ("#FF6961", 100),
         }
         color, fill = color_map.get(status, ("#FFFFFF", 0))
         return f"""
@@ -183,102 +132,110 @@ if st.session_state.logged_in:
             <strong>{status}</strong>
         </div>
         """
-
-    sync_activity_column()
-
     # --- Sidebar Navigation ---
     main_menu = st.sidebar.selectbox("Main Menu", ["Land Acquisition", "Land Development"])
     if main_menu == "Land Development":
         land_development.render_land_development_ui()
-        st.stop()  # Prevents the rest of the app from running
-
+        st.stop()
 
     if main_menu == "Land Acquisition":
         st.title("📍 Land Acquisition Tracker")
         view = st.sidebar.radio("Select View", ["Search Properties", "Add New Deal", "Preview Deals Table", "LOI Creation"])
+
         # --- Search Properties ---
         if view == "Search Properties":
             st.header("🔍 Search Properties")
             activity_filter = st.selectbox("Activity", ["Active", "No Go", "All"])
             status_filter = st.selectbox("Status", ["All"] + STATUS_OPTIONS)
 
-            query = "SELECT pk, status, property_name, location, property_type, size, asking_price, proposed_price FROM deals WHERE 1=1"
-            filters = []
+            query = supabase.table("deals").select(
+                "pk, status, property_name, location, property_type, size, asking_price, proposed_price, link"
+            )
             if activity_filter != "All":
-                query += " AND activity = ?"
-                filters.append(activity_filter)
+                query = query.eq("activity", activity_filter)
             if status_filter != "All":
-                query += " AND status = ?"
-                filters.append(status_filter)
+                query = query.eq("status", status_filter)
 
-            results = cursor.execute(query, filters).fetchall()
-            df = pd.DataFrame(results, columns=["PK", "Status", "Property Name", "Location", "Property Type", "Size", "Asking Price", "Proposed Price"])
-            df["_sort"] = df["Status"].map(lambda x: STATUS_OPTIONS.index(x) if x in STATUS_OPTIONS else 99)
-            df = df.sort_values(by=["_sort", "Property Name"]).drop(columns=["_sort"])
-            df_page, page = paginate_dataframe(df)
+            response = query.execute()
+            df = pd.DataFrame(response.data)
 
-            headers = ["Status", "Property Name", "Location", "Property Type", "Size", "Asking Price", "Proposed Price", "Link", "Edit"]
-            for col, header in zip(st.columns([1.2, 1.5, 1.5, 1.2, 1.2, 1.2, 1.2, 0.8, 0.8]), headers):
-                col.markdown(f"**{header}**")
+            if df.empty:
+                st.info("No matching records found.")
+            else:
+                df["_sort"] = df["status"].map(lambda x: STATUS_OPTIONS.index(x) if x in STATUS_OPTIONS else 99)
+                df = df.sort_values(by=["_sort", "property_name"]).drop(columns=["_sort"])
+                df_page, page = paginate_dataframe(df)
 
-            for _, row in df_page.iterrows():
-                deal = get_deal(row["PK"])
-                link_url = deal[8] if deal else ""
-                c = st.columns([1.2, 1.5, 1.5, 1.2, 1.2, 1.2, 1.2, 0.8, 0.8])
-                c[0].markdown(render_status_cell(row["Status"]), unsafe_allow_html=True)
-                c[1].markdown(f"<strong>{row['Property Name']}</strong>", unsafe_allow_html=True)
-                c[2].write(row["Location"])
-                c[3].write(row["Property Type"])
-                c[4].write(row["Size"])
-                c[5].write(row["Asking Price"] or "TBD")
-                c[6].write(row["Proposed Price"] or "TBD")
-                c[7].markdown(f'<a href="{link_url}" target="_blank">link</a>' if link_url else "TBD", unsafe_allow_html=True)
-                if c[8].button("✏️ Edit", key=f"edit-{row['PK']}"):
-                    st.session_state.edit_pk = row["PK"]
+                headers = ["Status", "Property Name", "Location", "Property Type", "Size", "Asking Price", "Proposed Price", "Link", "Edit"]
+                for col, header in zip(st.columns([1.2, 1.5, 1.5, 1.2, 1.2, 1.2, 1.2, 0.8, 0.8]), headers):
+                    col.markdown(f"**{header}**")
 
-            if "edit_pk" in st.session_state:
-                deal = get_deal(st.session_state.edit_pk)
-                if deal:
-                    st.subheader(f"📝 Edit Deal: {deal[0]}")
-                    with st.form("edit_form"):
-                        status = st.selectbox("Status", STATUS_OPTIONS, index=STATUS_OPTIONS.index(deal[1]))
-                        name = st.text_input("Property Name", value=deal[2])
-                        location = st.text_input("Location", value=deal[3])
-                        prop_type = st.text_input("Property Type", value=deal[4])
-                        size = st.text_input("Size", value=deal[5])
-                        asking = st.text_input("Asking Price", value=deal[6])
-                        proposed = st.text_input("Proposed Price", value=deal[7])
-                        link = st.text_input("Link", value=deal[8])
-                        receive_dt = deal[9] or ""
-                        st.markdown(f"**Receive Date:** `{receive_dt}`")
-                        activity = "No Go" if status == "No Go" else "Active"
+                for _, row in df_page.iterrows():
+                    deal = get_deal(row["pk"])
+                    link_url = deal.get("link", "")
+                    c = st.columns([1.2, 1.5, 1.5, 1.2, 1.2, 1.2, 1.2, 0.8, 0.8])
+                    c[0].markdown(render_status_cell(row["status"]), unsafe_allow_html=True)
+                    c[1].markdown(f"<strong>{row['property_name']}</strong>", unsafe_allow_html=True)
+                    c[2].write(row["location"])
+                    c[3].write(row["property_type"])
+                    c[4].write(row["size"])
+                    c[5].write(row["asking_price"] or "TBD")
+                    c[6].write(row["proposed_price"] or "TBD")
+                    c[7].markdown(f'<a href="{link_url}" target="_blank">link</a>' if link_url else "TBD", unsafe_allow_html=True)
+                    if c[8].button("✏️ Edit", key=f"edit-{row['pk']}"):
+                        st.session_state.edit_pk = row["pk"]
 
-                        colA, colB = st.columns([1, 1])
-                        save = colA.form_submit_button("💾 Save Changes")
-                        cancel = colB.form_submit_button("❌ Cancel")
+                if "edit_pk" in st.session_state:
+                    deal = get_deal(st.session_state.edit_pk)
+                    if deal:
+                        st.subheader(f"📝 Edit Deal: {deal['pk']}")
+                        with st.form("edit_form"):
+                            status = st.selectbox("Status", STATUS_OPTIONS, index=STATUS_OPTIONS.index(deal["status"]))
+                            name = st.text_input("Property Name", value=deal["property_name"])
+                            location = st.text_input("Location", value=deal["location"])
+                            prop_type = st.text_input("Property Type", value=deal["property_type"])
+                            size = st.text_input("Size", value=deal["size"])
+                            asking = st.text_input("Asking Price", value=deal["asking_price"])
+                            proposed = st.text_input("Proposed Price", value=deal["proposed_price"])
+                            link = st.text_input("Link", value=deal["link"])
+                            receive_dt = deal["receive_dt"]
+                            st.markdown(f"**Receive Date:** `{receive_dt}`")
+                            activity = "No Go" if status == "No Go" else "Active"
 
-                    if save:
-                        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        updated = (
-                            deal[0], status, name, location, prop_type, size,
-                            asking, proposed, link,
-                            receive_dt,
-                            deal[10] or (now if status == "Underwriting" and deal[1] != "Underwriting" else None),
-                            deal[11] or (now if status == "Initial Review" and deal[1] != "Initial Review" else None),
-                            deal[12] or (now if status == "LOI" and deal[1] != "LOI" else None),
-                            deal[13] or (now if status == "Second Review" and deal[1] != "Second Review" else None),
-                            deal[14] or (now if status == "PSA" and deal[1] != "PSA" else None),
-                            deal[15] or (now if status == "No Go" and deal[1] != "No Go" else None),
-                            activity
-                        )
-                        upsert_deal(updated)
-                        st.success("✅ Changes saved.")
-                        st.session_state.edit_pk = None
-                        st.stop()
-                    elif cancel:
-                        st.session_state.edit_pk = None
-                        st.info("🛑 Edit canceled.")
-                        st.stop()
+                            colA, colB = st.columns([1, 1])
+                            save = colA.form_submit_button("💾 Save Changes")
+                            cancel = colB.form_submit_button("❌ Cancel")
+
+                        if save:
+                            now = datetime.now().isoformat()
+                            updated = {
+                                "pk": deal["pk"],
+                                "status": status,
+                                "property_name": name,
+                                "location": location,
+                                "property_type": prop_type,
+                                "size": size,
+                                "asking_price": asking,
+                                "proposed_price": proposed,
+                                "link": link,
+                                "receive_dt": receive_dt,
+                                "underwriting_dt": deal["underwriting_dt"] or (now if status == "Underwriting" and deal["status"] != "Underwriting" else None),
+                                "initial_review_dt": deal["initial_review_dt"] or (now if status == "Initial Review" and deal["status"] != "Initial Review" else None),
+                                "loi_dt": deal["loi_dt"] or (now if status == "LOI" and deal["status"] != "LOI" else None),
+                                "second_review_dt": deal["second_review_dt"] or (now if status == "Second Review" and deal["status"] != "Second Review" else None),
+                                "psa_dt": deal["psa_dt"] or (now if status == "PSA" and deal["status"] != "PSA" else None),
+                                "no_go_dt": deal["no_go_dt"] or (now if status == "No Go" and deal["status"] != "No Go" else None),
+                                "activity": activity
+                            }
+                            upsert_deal(updated)
+                            st.success("✅ Changes saved.")
+                            del st.session_state.edit_pk
+                            st.rerun()
+                        elif cancel:
+                            del st.session_state.edit_pk
+                            st.info("🛑 Edit canceled.")
+                            st.rerun()
+
         # --- Add New Deal ---
         elif view == "Add New Deal":
             st.header("➕ Add New Deal")
@@ -297,7 +254,7 @@ if st.session_state.logged_in:
                 asking = st.text_input("Asking Price")
                 proposed = st.text_input("Proposed Price")
                 link = st.text_input("Link to File")
-                receive_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                receive_dt = datetime.now().isoformat()
                 st.markdown(f"**Receive Date:** `{receive_dt}`")
                 status = "Not started"
                 activity = "Active"
@@ -309,34 +266,42 @@ if st.session_state.logged_in:
                     elif is_duplicate_deal(name, location, prop_type, size):
                         st.warning("⚠️ A deal with the same Property Name, Location, Property Type, and Size already exists.")
                     else:
-                        data = (
-                            pk, status, name, location, prop_type, size,
-                            asking, proposed, link,
-                            receive_dt, None, None, None, None, None, None,
-                            activity
-                        )
+                        data = {
+                            "pk": pk,
+                            "status": status,
+                            "property_name": name,
+                            "location": location,
+                            "property_type": prop_type,
+                            "size": size,
+                            "asking_price": asking,
+                            "proposed_price": proposed,
+                            "link": link,
+                            "receive_dt": receive_dt,
+                            "underwriting_dt": None,
+                            "initial_review_dt": None,
+                            "loi_dt": None,
+                            "second_review_dt": None,
+                            "psa_dt": None,
+                            "no_go_dt": None,
+                            "activity": activity
+                        }
                         upsert_deal(data)
                         st.session_state.deal_saved = True
                         st.rerun()
-
         # --- Preview Deals Table ---
         elif view == "Preview Deals Table":
             st.header("📊 Full Deal Inventory")
-            full_df = pd.read_sql_query("SELECT * FROM deals", conn)
+            response = supabase.table("deals").select("*").execute()
+            full_df = pd.DataFrame(response.data)
             st.dataframe(full_df)
 
         # --- LOI Creation ---
         elif view == "LOI Creation":
             st.header("📄 LOI Creation")
 
-            cursor.execute("""
-                SELECT pk, property_name 
-                FROM deals 
-                WHERE status IN ('LOI', 'Second Review', 'PSA') 
-                ORDER BY pk DESC
-            """)
-            deals = cursor.fetchall()
-            deal_options = {f"{pk} - {name}": pk for pk, name in deals}
+            response = supabase.table("deals").select("pk, property_name").in_("status", ["LOI", "Second Review", "PSA"]).order("pk", desc=True).execute()
+            deals = response.data
+            deal_options = {f"{d['pk']} - {d['property_name']}": d["pk"] for d in deals}
 
             with st.form("loi_form"):
                 st.subheader("Fill in LOI Details")
@@ -413,8 +378,9 @@ if st.session_state.logged_in:
 
                 replace_placeholders(doc, replacements)
 
-                cursor.execute("SELECT property_name, property_type FROM deals WHERE pk = ?", (deal_pk,))
-                property_name, property_type = cursor.fetchone()
+                deal_info = supabase.table("deals").select("property_name, property_type").eq("pk", deal_pk).execute().data[0]
+                property_name = deal_info["property_name"]
+                property_type = deal_info["property_type"]
 
                 def sanitize(text):
                     return text.strip().replace(" ", "_").replace("/", "-")
@@ -427,18 +393,20 @@ if st.session_state.logged_in:
                 doc.save(doc_io)
                 doc_io.seek(0)
 
-                cursor.execute('''
-                    INSERT INTO lois (deal_pk, created_at, sent_at, received_at, file_path, notes)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (
-                    deal_pk,
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    sent_at.strftime("%Y-%m-%d") if sent_at else None,
-                    received_at.strftime("%Y-%m-%d") if received_at else None,
-                    filename,
-                    notes
-                ))
-                conn.commit()
+                supabase.table("lois").insert({
+                    "deal_pk": deal_pk,
+                    "created_at": datetime.now().isoformat(),
+                    "sent_at": sent_at.strftime("%Y-%m-%d") if sent_at else None,
+                    "received_at": received_at.strftime("%Y-%m-%d") if received_at else None,
+                    "file_path": filename,
+                    "notes": notes
+                }).execute()
 
                 st.success("✅ LOI generated.")
                 st.download_button("📥 Download LOI", doc_io, file_name=filename)
+# --- End of Main App Logic ---
+
+
+
+
+
