@@ -78,10 +78,6 @@ if not st.session_state.logged_in:
     password = st.text_input("Password", type="password")
     users_df = load_users()
 
-    # Debug: Show columns and sample data
-    st.write("📋 Columns in users_df:", users_df.columns.tolist())
-    st.write("🔍 Preview of users_df:", users_df.head())
-
     if st.button("Login"):
         if check_password(username, password, users_df):
             st.session_state.logged_in = True
