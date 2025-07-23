@@ -23,14 +23,15 @@ if "authenticated" not in st.session_state:
 if "deal_saved" not in st.session_state:
     st.session_state.deal_saved = False
 
-# Authentication
+#Authentication
 def check_password(username, password):
     response = supabase.table("users").select("*").eq("username", username).execute()
     users = response.data
-    if not users:
+    if not users or "password_hash_text" not in users[0]:
         return False
     stored_hash = users[0]["password_hash_text"]
     return bcrypt.checkpw(password.encode(), stored_hash.encode())
+
 
 def login():
     st.title("🔐 Login")
