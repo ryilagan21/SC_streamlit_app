@@ -118,6 +118,9 @@ def upsert_deal(data):
     if existing.data:
         supabase.table("deals").update(data).eq("pk", pk).execute()
     else:
+        for key in ["size", "asking_price", "proposed_price"]:
+            if data[key] == "":
+                data[key] = None
         supabase.table("deals").insert(data).execute()
 
 def get_deal(pk):
@@ -170,7 +173,6 @@ def render_status_cell(status):
         <strong>{status}</strong>
     </div>
     """
-
 # app.py (Part 2)
 
 # --- Sidebar Navigation ---
@@ -276,8 +278,6 @@ if main_menu == "Land Acquisition":
                         del st.session_state.edit_pk
                         st.info("🛑 Edit canceled.")
                         st.rerun()
-# app.py (Part 3)
-
     # --- Add New Deal ---
     elif view == "Add New Deal":
         st.header("➕ Add New Deal")
@@ -374,8 +374,6 @@ if main_menu == "Land Acquisition":
                 notes = st.text_area("Notes (optional)")
 
                 submit = st.form_submit_button("📝 Generate LOI")
-# app.py (Part 4)
-
             if submit and deal_pk:
                 def replace_placeholder_in_paragraph(paragraph, replacements):
                     full_text = ''.join(run.text for run in paragraph.runs)
