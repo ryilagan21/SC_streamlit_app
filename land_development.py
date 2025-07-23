@@ -28,6 +28,13 @@ def get_connection():
 conn = get_connection()
 cursor = conn.cursor()
 
+# --- Safe Currency Formatter ---
+def safe_currency(value):
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return 0.0
+
 # --- Add Entry View ---
 def render_add_entry():
     st.header("➕ Add Land Development Entry")
@@ -69,14 +76,8 @@ def render_add_entry():
             st.success("✅ Entry added successfully.")
         except Exception as e:
             st.error(f"❌ Failed to add entry: {e}")
-# --- Safe Currency Formatter ---
-def safe_currency(value):
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return 0.0
 
-# --- Budget Summary View ---
+# --- Budget Summary View (Expandable) ---
 def render_budget_summary():
     st.header("📊 Budget Summary")
     df = pd.read_sql_query("SELECT * FROM land_development", conn)
@@ -88,32 +89,32 @@ def render_budget_summary():
     for col in ["proposed_budget", "change_order", "revised_budget"]:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
-    summary = df.groupby(["community", "contractor"]).agg({
-        "proposed_budget": "sum",
-        "change_order": "sum",
-        "revised_budget": "sum"
-    }).reset_index()
+    grouped = df.groupby(["community", "contractor"])
+    for (community, contractor), group in grouped:
+        total_proposed = group["proposed_budget"].sum()
+        total_change = group["change_order"].sum()
+        total_revised = group["revised_budget"].sum()
 
-    summary.columns = ["Community", "Contractor", "Total Proposed", "Total Change Order", "Total Revised"]
-    st.dataframe(summary.style.format({
-        "Total Proposed": "${:,.2f}",
-        "Total Change Order": "${:,.2f}",
-        "Total Revised": "${:,.2f}"
-    }))
-
-# --- Edit Entry Form (Inline) ---
+        with st.expander(f"📍 {community} | {contractor}"):
+            col1, col2, col3 = st.columns(3)
+            if col1.button(f"${total_proposed:,.2f}", key=f"prop_{community}_{contractor}"):
+                st.write("**Proposed Budget Details**")
+                st.dataframe(group[["budget_item", "proposed_budget"]])
+            if col2.button(f"${total_change:,.2f}", key=f"chg_{community}_{contractor}"):
+                st.write("**Change Order Details**")
+                st.dataframe(group[["budget_item", "change_order"]])
+            if col3.button(f"${total_revised:,.2f}", key=f"rev_{community}_{contractor}"):
+                st.write("**Revised Budget Details**")
+                st.dataframe(group[["budget_item", "revised_budget"]])
+# --- Inline Edit Form ---
 def render_inline_edit_form(row):
     unique_id = row["LD_PK"]
     edit_key = f"edit_mode_{unique_id}"
 
     if st.session_state.get(edit_key, False):
         with st.form(f"edit_form_{unique_id}"):
-            classification_value = row.get("classification", "Proposed Budget")
-            if classification_value not in ["Proposed Budget", "Change Order"]:
-                classification_value = "Proposed Budget"
-
             classification = st.selectbox("Classification", ["Proposed Budget", "Change Order"],
-                                          index=["Proposed Budget", "Change Order"].index(classification_value),
+                                          index=["Proposed Budget", "Change Order"].index(row.get("classification", "Proposed Budget")),
                                           key=f"classification_{unique_id}")
 
             community = st.text_input("Community", value=row["community"], key=f"community_{unique_id}")
@@ -121,17 +122,15 @@ def render_inline_edit_form(row):
             budget_item = st.text_input("Budget Item", value=row["budget_item"], key=f"budget_item_{unique_id}")
             contractor = st.text_input("Contractor", value=row["contractor"], key=f"contractor_{unique_id}")
 
-            proposed_budget = st.number_input("Proposed Budget", value=row["proposed_budget"], format="%.2f",
-                                              disabled=(classification != "Proposed Budget"),
-                                              key=f"proposed_budget_{unique_id}")
-            change_order = st.number_input("Change Order", value=row["change_order"], format="%.2f",
-                                           disabled=(classification != "Change Order"),
-                                           key=f"change_order_{unique_id}")
+            proposed_budget = st.number_input("Proposed Budget", value=safe_currency(row["proposed_budget"]), format="%.2f",
+                                              disabled=(classification != "Proposed Budget"), key=f"proposed_budget_{unique_id}")
+            change_order = st.number_input("Change Order", value=safe_currency(row["change_order"]), format="%.2f",
+                                           disabled=(classification != "Change Order"), key=f"change_order_{unique_id}")
             revised_budget = proposed_budget + change_order
 
             status = st.selectbox("Status",
                                   ["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"],
-                                  index=["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"].index(row["status"]),
+                                  index=["Proposal Received", "Document Approved", "Sent For signature", "Contract executed"].index(row.get("status", "Proposal Received")),
                                   key=f"status_{unique_id}")
 
             date_executed = pd.to_datetime(row["date_executed"]) if row["date_executed"] else None
@@ -144,20 +143,27 @@ def render_inline_edit_form(row):
             cancel = col2.form_submit_button("❌ Cancel")
 
         if save:
+            if not community or not location or not budget_item:
+                st.error("Please fill in all required fields.")
+                return
+
             date_value = date_input.strftime("%Y-%m-%d") if date_optional else None
-            cursor.execute('''
-                UPDATE land_development SET
-                    community=?, location=?, budget_item=?, contractor=?, classification=?,
-                    proposed_budget=?, change_order=?, revised_budget=?, status=?, date_executed=?
-                WHERE LD_PK=?
-            ''', (
-                community, location, budget_item, contractor, classification,
-                proposed_budget, change_order, revised_budget, status, date_value,
-                unique_id
-            ))
-            conn.commit()
-            st.success("✅ Entry updated.")
-            st.session_state[edit_key] = False
+            try:
+                cursor.execute('''
+                    UPDATE land_development SET
+                        community=?, location=?, budget_item=?, contractor=?, classification=?,
+                        proposed_budget=?, change_order=?, revised_budget=?, status=?, date_executed=?
+                    WHERE LD_PK=?
+                ''', (
+                    community, location, budget_item, contractor, classification,
+                    proposed_budget, change_order, revised_budget, status, date_value,
+                    unique_id
+                ))
+                conn.commit()
+                st.success("✅ Entry updated.")
+                st.session_state[edit_key] = False
+            except Exception as e:
+                st.error(f"❌ Failed to update entry: {e}")
 
         elif cancel:
             st.session_state[edit_key] = False
@@ -220,6 +226,41 @@ def render_details_view():
 
             for _, row in group.iterrows():
                 render_inline_edit_form(row)
+
+# --- Pending Contracts View ---
+def render_pending_contracts():
+    st.header("📌 Pending Contracts")
+    df = pd.read_sql_query("SELECT * FROM land_development", conn)
+    df = df[df["status"] != "Contract executed"]
+
+    status_order = {
+        "Proposal Received": 0,
+        "Document Approved": 1,
+        "Sent For signature": 2
+    }
+
+    df["status_rank"] = df["status"].map(status_order)
+    df = df.sort_values(by="status_rank")
+
+    def get_status_color(status):
+        if status == "Proposal Received":
+            return "background-color: lightgray"
+        elif status == "Document Approved":
+            return "background: linear-gradient(90deg, yellow 50%, lightgray 50%)"
+        elif status == "Sent For signature":
+            return "background-color: yellow"
+        return ""
+
+    if df.empty:
+        st.info("No pending contracts.")
+    else:
+        display_df = df[["status", "community", "contractor", "budget_item", "proposed_budget", "change_order", "revised_budget"]]
+        styled_df = display_df.style.applymap(get_status_color, subset=["status"]).format({
+            "proposed_budget": "${:,.2f}",
+            "change_order": "${:,.2f}",
+            "revised_budget": "${:,.2f}"
+        })
+        st.dataframe(styled_df)
 # --- Preview All View ---
 def render_preview_all():
     st.header("📁 Preview All Entries")
@@ -319,13 +360,15 @@ def render_batch_entry():
 def render_land_development_ui():
     st.title("🏗️ Land Development")
     view = st.sidebar.radio("Select View", [
-        "Budget Summary", "Details", "Preview All", "Add Entry", "Batch Entry"
+        "Budget Summary", "Details", "Pending Contracts", "Preview All", "Add Entry", "Batch Entry"
     ])
 
     if view == "Budget Summary":
         render_budget_summary()
     elif view == "Details":
         render_details_view()
+    elif view == "Pending Contracts":
+        render_pending_contracts()
     elif view == "Preview All":
         render_preview_all()
     elif view == "Add Entry":
