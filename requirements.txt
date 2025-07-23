@@ -7,3 +7,4 @@ pandas
 openpyxl
 O365
 bcrypt
+supabase
