@@ -18,12 +18,14 @@ def load_users():
     response = supabase.table("users").select("*").execute()
     return pd.DataFrame(response.data)
 
-def check_password(username, password, users_df):
-    user_row = users_df[users_df['username'] == username]
-    if not user_row.empty:
-        stored_hash = user_row.iloc[0]['password_hash']
-        return bcrypt.checkpw(password.encode(), stored_hash.encode())
-    return False
+def check_password(username, password):
+    response = supabase.table("users").select("*").eq("username", username).execute()
+    users = response.data
+    if not users or "password_hash" not in users[0]:
+        return False
+    stored_hash = users[0]["password_hash"]
+    return bcrypt.checkpw(password.encode(), stored_hash.encode())
+
 
 def update_password(username, current_password, new_password):
     users_df = load_users()
