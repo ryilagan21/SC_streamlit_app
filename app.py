@@ -25,24 +25,39 @@ def check_password(username, password, users_df):
     stored_hash = user_row.iloc[0]["password_hash"]
     return bcrypt.checkpw(password.encode(), stored_hash.encode())
 
-
-
 def update_password(username, current_password, new_password):
-    users_df = load_users()
-    user_row = users_df[users_df['username'] == username]
-    if user_row.empty:
-        st.error("User not found.")
+    try:
+        users_df = load_users()
+
+        # Check if 'username' column exists
+        if 'username' not in users_df.columns:
+            st.error("⚠️ 'username' column not found in users table.")
+            return False
+
+        # Filter for the user
+        user_row = users_df[users_df['username'] == username]
+        if user_row.empty:
+            st.error("❌ User not found.")
+            return False
+
+        # Check current password
+        stored_hash = user_row.iloc[0].get('password_hash')
+        if not stored_hash or not bcrypt.checkpw(current_password.encode(), stored_hash.encode()):
+            st.error("🔐 Current password is incorrect.")
+            return False
+
+        # Hash and update new password
+        new_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
+        supabase.table("users").update({"password_hash": new_hash}).eq("username", username).execute()
+
+        st.success("✅ Password updated successfully.")
+        return True
+
+    except Exception as e:
+        st.error(f"🚨 An unexpected error occurred: {e}")
         return False
 
-    stored_hash = user_row.iloc[0]['password_hash']
-    if not bcrypt.checkpw(current_password.encode(), stored_hash.encode()):
-        st.error("Current password is incorrect.")
-        return False
 
-    new_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
-    supabase.table("users").update({"password_hash": new_hash}).eq("username", username).execute()
-    st.success("✅ Password updated successfully.")
-    return True
 
 # --- Initialize session state ---
 if "logged_in" not in st.session_state:
