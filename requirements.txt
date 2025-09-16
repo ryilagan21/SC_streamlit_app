@@ -8,3 +8,4 @@ openpyxl
 O365
 bcrypt
 supabase
+streamlit-cookies-manager
